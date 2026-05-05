@@ -1,0 +1,42 @@
+{
+  "name": "dl-sms-client",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "autoprefixer": "^10",
+    "axios": "^1.6",
+    "bcryptjs": "^2.4",
+    "better-sqlite3": "^9.4",
+    "cheerio": "^1.0",
+    "fetch-cookie": "^3.0",
+    "grammy": "^1.21",
+    "jose": "^5",
+    "next": "14.2.5",
+    "node-fetch": "^2.7",
+    "postcss": "^8",
+    "qrcode": "^1.5",
+    "react": "^18",
+    "react-dom": "^18",
+    "tailwindcss": "^3.4",
+    "tough-cookie": "^4.1",
+    "typescript": "^5",
+    "uuid": "^9"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4",
+    "@types/better-sqlite3": "^7",
+    "@types/node": "^20",
+    "@types/node-fetch": "^2.6",
+    "@types/qrcode": "^1.5",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@types/tough-cookie": "^4",
+    "@types/uuid": "^10.0.0"
+  }
+}
