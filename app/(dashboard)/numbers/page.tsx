@@ -1,16 +1,29 @@
 'use client'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
+
+const REFRESH_INTERVAL = 30000 // 30 seconds
+
+function CountryFlag({ country }: { country: string }) {
+  // ISO 3166-1 alpha-2 to regional indicator emoji
+  const code = (country || 'US').toUpperCase().slice(0, 2)
+  const flagEmoji = code.split('').map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('')
+  return <span style={{ fontSize: 20, lineHeight: 1 }}>{flagEmoji}</span>
+}
 
 export default function NumbersPage() {
-  const [numbers, setNumbers] = useState<any[]>([])
-  const [filtered, setFiltered] = useState<any[]>([])
-  const [search, setSearch] = useState('')
-  const [countryFilter, setCountryFilter] = useState('')
-  const [syncing, setSyncing] = useState(false)
-  const [syncMsg, setSyncMsg] = useState('')
-  const [expandedId, setExpandedId] = useState<string | null>(null)
-  const [smsMap, setSmsMap] = useState<Record<string, any[]>>({})
-  const [loading, setLoading] = useState(true)
+  const [numbers,      setNumbers]      = useState<any[]>([])
+  const [filtered,     setFiltered]     = useState<any[]>([])
+  const [search,       setSearch]       = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [syncing,      setSyncing]      = useState(false)
+  const [syncMsg,      setSyncMsg]      = useState<{ ok: boolean; text: string } | null>(null)
+  const [loading,      setLoading]      = useState(true)
+  const [expandedId,   setExpandedId]   = useState<string | null>(null)
+  const [smsMap,       setSmsMap]       = useState<Record<string, any[]>>({})
+  const [smsLoading,   setSmsLoading]   = useState<Record<string, boolean>>({})
+  const [countdown,    setCountdown]    = useState(REFRESH_INTERVAL / 1000)
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fetchRef     = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchNumbers = useCallback(async () => {
     try {
@@ -18,179 +31,416 @@ export default function NumbersPage() {
       if (r.ok) {
         const { numbers: nums } = await r.json()
         setNumbers(nums || [])
-        setFiltered(nums || [])
       }
     } catch {}
     setLoading(false)
+    setCountdown(REFRESH_INTERVAL / 1000) // reset countdown
   }, [])
 
-  useEffect(() => { fetchNumbers() }, [fetchNumbers])
+  // Initial load + interval
+  useEffect(() => {
+    fetchNumbers()
 
+    fetchRef.current = setInterval(fetchNumbers, REFRESH_INTERVAL)
+    return () => {
+      if (fetchRef.current) clearInterval(fetchRef.current)
+    }
+  }, [fetchNumbers])
+
+  // Countdown timer (visual)
+  useEffect(() => {
+    countdownRef.current = setInterval(() => {
+      setCountdown(prev => (prev <= 1 ? REFRESH_INTERVAL / 1000 : prev - 1))
+    }, 1000)
+    return () => { if (countdownRef.current) clearInterval(countdownRef.current) }
+  }, [])
+
+  // Filter logic
   useEffect(() => {
     let f = numbers
-    if (search) f = f.filter(n => n.phone?.includes(search) || n.country?.toLowerCase().includes(search.toLowerCase()))
-    if (countryFilter) f = f.filter(n => n.country === countryFilter)
+    if (search) f = f.filter(n =>
+      (n.phone || '').includes(search) ||
+      (n.country || '').toLowerCase().includes(search.toLowerCase()) ||
+      (n.country_name || '').toLowerCase().includes(search.toLowerCase())
+    )
+    if (statusFilter) f = f.filter(n => n.status === statusFilter)
     setFiltered(f)
-  }, [search, countryFilter, numbers])
+  }, [search, statusFilter, numbers])
 
   const handleSync = async () => {
-    setSyncing(true)
-    setSyncMsg('')
+    setSyncing(true); setSyncMsg(null)
     try {
       const r = await fetch('/api/ivasms/sync', { method: 'POST' })
       const d = await r.json()
       if (d.success) {
-        setSyncMsg(`✓ Synced ${d.count} numbers (${d.added} new)`)
+        setSyncMsg({ ok: true, text: `Synced ${d.count} numbers · ${d.added ?? 0} found · ${d.smsAdded ?? 0} new SMS` })
         fetchNumbers()
       } else {
-        setSyncMsg(`✗ ${d.error}`)
+        setSyncMsg({ ok: false, text: d.error || 'Sync failed. Check iVASMS credentials in Settings.' })
       }
-    } catch { setSyncMsg('✗ Network error') }
-    finally { setSyncing(false); setTimeout(() => setSyncMsg(''), 5000) }
+    } catch {
+      setSyncMsg({ ok: false, text: 'Network error — please try again.' })
+    } finally {
+      setSyncing(false)
+      setTimeout(() => setSyncMsg(null), 8000)
+    }
   }
 
-  const fetchSMSForNumber = async (numberId: string, phone: string) => {
-    if (smsMap[numberId]) return
+  const toggleExpand = async (num: any) => {
+    if (expandedId === num.id) { setExpandedId(null); return }
+    setExpandedId(num.id)
+    if (!smsMap[num.id]) {
+      setSmsLoading(p => ({ ...p, [num.id]: true }))
+      try {
+        const r = await fetch(`/api/ivasms/sms?numberId=${num.id}&limit=10`)
+        if (r.ok) {
+          const { messages } = await r.json()
+          setSmsMap(p => ({ ...p, [num.id]: messages || [] }))
+        }
+      } catch {}
+      setSmsLoading(p => ({ ...p, [num.id]: false }))
+    }
+  }
+
+  // Live SMS refresh for expanded row
+  useEffect(() => {
+    if (!expandedId) return
+    const t = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/ivasms/sms?numberId=${expandedId}&limit=10`)
+        if (r.ok) {
+          const { messages } = await r.json()
+          setSmsMap(p => ({ ...p, [expandedId]: messages || [] }))
+        }
+      } catch {}
+    }, 5000)
+    return () => clearInterval(t)
+  }, [expandedId])
+
+  const activeCount   = numbers.filter(n => n.status === 'active').length
+  const inactiveCount = numbers.filter(n => n.status !== 'active').length
+  const countries     = [...new Set(numbers.map(n => n.country).filter(Boolean))]
+
+  const fmtTime = (t: string) => {
+    if (!t) return '—'
     try {
-      const r = await fetch(`/api/ivasms/sms?numberId=${numberId}&limit=5`)
-      if (r.ok) {
-        const { messages } = await r.json()
-        setSmsMap(prev => ({ ...prev, [numberId]: messages || [] }))
-      }
-    } catch {}
+      const d    = new Date(t)
+      const now  = new Date()
+      const diff = (now.getTime() - d.getTime()) / 1000
+      if (diff < 60)    return `${Math.floor(diff)}s ago`
+      if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`
+      if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+      return d.toLocaleDateString()
+    } catch { return t }
   }
 
-  const toggleExpand = (id: string, phone: string) => {
-    if (expandedId === id) { setExpandedId(null); return }
-    setExpandedId(id)
-    fetchSMSForNumber(id, phone)
+  const StatusBadge = ({ status }: { status: string }) => {
+    if (status === 'active') return (
+      <span className="badge badge-green" style={{ gap: 5 }}>
+        <span className="dot dot-green" style={{ width: 6, height: 6, boxShadow: 'none' }} />
+        Active
+      </span>
+    )
+    if (status === 'expired') return (
+      <span className="badge badge-orange" style={{ gap: 5 }}>
+        <i className="bi bi-exclamation-triangle-fill" style={{ fontSize: 9 }} />
+        Expired
+      </span>
+    )
+    return (
+      <span className="badge badge-gray" style={{ gap: 5 }}>
+        <i className="bi bi-dash-circle" style={{ fontSize: 9 }} />
+        Inactive
+      </span>
+    )
   }
-
-  const countries = Array.from(new Set(numbers.map((n: any) => n.country).filter(Boolean)))
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>📱 Numbers</h2>
-          <p style={{ color: 'var(--text3)', fontSize: 13 }}>{numbers.length} numbers synced from iVASMS</p>
+          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)' }}>Phone Numbers</h2>
+          <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 2 }}>
+            Manage your iVASMS numbers ·&nbsp;
+            <span className="live-badge" style={{ fontSize: 10, verticalAlign: 'middle' }}>
+              <span className="live-dot" />
+              Auto-refresh in {countdown}s
+            </span>
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-          {syncMsg && <span style={{ fontSize: 12, color: syncMsg.startsWith('✓') ? 'var(--green)' : 'var(--accent)', padding: '4px 10px', background: 'var(--bg2)', borderRadius: 6 }}>{syncMsg}</span>}
-          <button onClick={handleSync} disabled={syncing} className="btn-primary" style={{ fontSize: 13, padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ display: 'inline-block', animation: syncing ? 'spin 1s linear infinite' : 'none' }}>⟳</span>
-            Sync from iVASMS
+          {syncMsg && (
+            <div className={`alert ${syncMsg.ok ? 'alert-success' : 'alert-error'}`} style={{ padding: '7px 12px', fontSize: 12 }}>
+              <i className={`bi ${syncMsg.ok ? 'bi-check2' : 'bi-exclamation-triangle-fill'}`} />
+              {syncMsg.text}
+            </div>
+          )}
+          <button
+            onClick={fetchNumbers}
+            className="btn-secondary btn-sm"
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            title="Refresh now"
+          >
+            <i className="bi bi-arrow-repeat" style={{ fontSize: 14 }} />
+            Refresh
+          </button>
+          <button
+            onClick={handleSync}
+            disabled={syncing}
+            className="btn-primary"
+            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px', fontSize: 13 }}
+          >
+            <i
+              className="bi bi-arrow-repeat"
+              style={{ animation: syncing ? 'spin 1s linear infinite' : 'none', display: 'inline-block', fontSize: 15 }}
+            />
+            {syncing ? 'Syncing iVASMS…' : 'Sync iVASMS'}
           </button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-        <input
-          placeholder="🔍 Search numbers or country..."
-          value={search} onChange={e => setSearch(e.target.value)}
-          style={{ maxWidth: 300 }}
-        />
-        <select value={countryFilter} onChange={e => setCountryFilter(e.target.value)} style={{ maxWidth: 180 }}>
-          <option value="">All Countries</option>
-          {countries.map(c => <option key={c} value={c}>{c}</option>)}
+      {/* ── Stats bar ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
+        {[
+          { icon: 'bi-phone-fill',    label: 'Total',     value: numbers.length, color: 'var(--accent)' },
+          { icon: 'bi-circle-fill',   label: 'Active',    value: activeCount,    color: 'var(--green)'  },
+          { icon: 'bi-dash-circle',   label: 'Inactive',  value: inactiveCount,  color: 'var(--text3)'  },
+          { icon: 'bi-globe',         label: 'Countries', value: countries.length, color: 'var(--blue)' },
+        ].map(s => (
+          <div key={s.label} className="card card-sm" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 9,
+              background: `${s.color}18`, border: `1px solid ${s.color}33`,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+            }}>
+              <i className={`bi ${s.icon}`} style={{ color: s.color, fontSize: 16 }} />
+            </div>
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 900, color: s.color }}>{s.value}</div>
+              <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5 }}>{s.label}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* ── Active / Inactive visual breakdown ── */}
+      {numbers.length > 0 && (
+        <div className="card card-sm" style={{ padding: '12px 16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+            <i className="bi bi-bar-chart-fill" style={{ color: 'var(--accent)', fontSize: 14 }} />
+            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Number Status Distribution</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <div style={{ flex: activeCount || 1, height: 8, borderRadius: '4px 0 0 4px', background: 'var(--green)', minWidth: 4 }} />
+            <div style={{ flex: inactiveCount || 1, height: 8, borderRadius: '0 4px 4px 0', background: 'var(--text3)', minWidth: 4 }} />
+          </div>
+          <div style={{ display: 'flex', gap: 20, marginTop: 6 }}>
+            <span style={{ fontSize: 11, color: 'var(--green)' }}>
+              <i className="bi bi-circle-fill" style={{ fontSize: 7, marginRight: 4 }} />
+              Active: {activeCount} ({numbers.length > 0 ? Math.round(activeCount / numbers.length * 100) : 0}%)
+            </span>
+            <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+              <i className="bi bi-dash-circle" style={{ fontSize: 9, marginRight: 4 }} />
+              Inactive: {inactiveCount} ({numbers.length > 0 ? Math.round(inactiveCount / numbers.length * 100) : 0}%)
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* ── Filters ── */}
+      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+        <div className="input-group" style={{ flex: '1 1 220px' }}>
+          <i className="bi bi-search input-icon" />
+          <input
+            type="text"
+            placeholder="Search by number, country…"
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+          />
+        </div>
+        <select
+          value={statusFilter}
+          onChange={e => setStatusFilter(e.target.value)}
+          style={{ width: 'auto', flex: '0 0 160px' }}
+        >
+          <option value="">All Status</option>
+          <option value="active">Active Only</option>
+          <option value="inactive">Inactive Only</option>
+          <option value="expired">Expired Only</option>
         </select>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span className="badge badge-green">{filtered.filter(n => n.status === 'active').length} Active</span>
-          <span className="badge badge-gray">{filtered.length} Total</span>
+        {(search || statusFilter) && (
+          <button
+            className="btn-ghost btn-sm"
+            onClick={() => { setSearch(''); setStatusFilter('') }}
+            style={{ display: 'flex', alignItems: 'center', gap: 5 }}
+          >
+            <i className="bi bi-x" style={{ fontSize: 15 }} />Clear
+          </button>
+        )}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text3)', fontSize: 12 }}>
+          <i className="bi bi-filter" />
+          {filtered.length} of {numbers.length} shown
         </div>
       </div>
 
-      {/* Table */}
+      {/* ── Table ── */}
       <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text3)' }}>
-            <div style={{ fontSize: 32, animation: 'spin 1s linear infinite', display: 'inline-block' }}>⟳</div>
-            <p style={{ marginTop: 12 }}>Loading numbers...</p>
+          <div style={{ padding: 40, textAlign: 'center' }}>
+            <i className="bi bi-arrow-repeat animate-spin" style={{ fontSize: 28, color: 'var(--accent)', display: 'block', marginBottom: 12 }} />
+            <p style={{ color: 'var(--text3)', fontSize: 13 }}>Loading numbers…</p>
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '64px 0', color: 'var(--text3)' }}>
-            <div style={{ fontSize: 48, marginBottom: 12 }}>📵</div>
-            <p style={{ fontSize: 15, marginBottom: 8 }}>No numbers found</p>
-            <p style={{ fontSize: 13, marginBottom: 20 }}>Configure iVASMS credentials in Settings, then sync.</p>
-            <button onClick={handleSync} className="btn-primary" style={{ padding: '10px 20px' }}>⟳ Sync Now</button>
+          <div style={{ padding: 48, textAlign: 'center', color: 'var(--text3)' }}>
+            <i className="bi bi-phone-fill" style={{ fontSize: 44, display: 'block', marginBottom: 16, opacity: .2 }} />
+            <p style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: 'var(--text2)' }}>
+              {numbers.length === 0 ? 'No numbers synced yet' : 'No numbers match your filter'}
+            </p>
+            <p style={{ fontSize: 13, marginBottom: 20 }}>
+              {numbers.length === 0
+                ? 'Add iVASMS credentials in Settings, then click Sync.'
+                : 'Try removing filters to see all numbers.'}
+            </p>
+            {numbers.length === 0 && (
+              <button onClick={handleSync} className="btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                <i className="bi bi-arrow-repeat" style={{ fontSize: 15 }} />Sync Now
+              </button>
+            )}
           </div>
         ) : (
-          <table style={{ margin: 0 }}>
+          <table>
             <thead>
               <tr>
-                <th style={{ paddingLeft: 20 }}>Flag</th>
-                <th>Phone Number</th>
-                <th>Country</th>
-                <th>Status</th>
-                <th>SMS Count</th>
-                <th>Last Received</th>
-                <th>WhatsApp</th>
-                <th>Actions</th>
+                <th><i className="bi bi-phone-fill" style={{ marginRight: 6 }} />Number</th>
+                <th><i className="bi bi-globe" style={{ marginRight: 6 }} />Country</th>
+                <th><i className="bi bi-circle-fill" style={{ marginRight: 6, fontSize: 8 }} />Status</th>
+                <th><i className="bi bi-chat-dots-fill" style={{ marginRight: 6 }} />SMS</th>
+                <th><i className="bi bi-clock-fill" style={{ marginRight: 6 }} />Last SMS</th>
+                <th><i className="bi bi-whatsapp" style={{ marginRight: 6 }} />WhatsApp</th>
+                <th style={{ width: 32 }}></th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((n: any) => (
                 <>
-                  <tr key={n.id} style={{ cursor: 'pointer' }} onClick={() => toggleExpand(n.id, n.phone)}>
-                    <td style={{ paddingLeft: 20, fontSize: 20 }}>{n.flag || '🌍'}</td>
-                    <td style={{ fontFamily: 'monospace', fontWeight: 600, color: 'var(--text)' }}>{n.phone}</td>
-                    <td style={{ color: 'var(--text2)', fontSize: 13 }}>{n.country || 'Unknown'}</td>
+                  <tr
+                    key={n.id}
+                    style={{ cursor: 'pointer' }}
+                    onClick={() => toggleExpand(n)}
+                  >
                     <td>
-                      <span className={`badge ${n.status === 'active' ? 'badge-green' : 'badge-red'}`}>
-                        {n.status || 'active'}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <CountryFlag country={n.country} />
+                        <div>
+                          <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{n.phone}</div>
+                          {n.ivasms_id && (
+                            <div style={{ fontSize: 10, color: 'var(--text3)' }}>ID: {n.ivasms_id}</div>
+                          )}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <div style={{ fontSize: 12, color: 'var(--text2)' }}>{n.country_name || n.country || '—'}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text3)' }}>{n.country}</div>
+                    </td>
+                    <td><StatusBadge status={n.status} /></td>
+                    <td>
+                      <span style={{
+                        fontWeight: 700, fontSize: 14,
+                        color: (n.sms_count || 0) > 0 ? 'var(--text)' : 'var(--text3)',
+                      }}>
+                        {n.sms_count || 0}
                       </span>
                     </td>
-                    <td style={{ color: 'var(--text2)', fontSize: 13 }}>{n.sms_count || 0}</td>
-                    <td style={{ color: 'var(--text3)', fontSize: 12 }}>
-                      {n.last_received ? new Date(n.last_received).toLocaleString() : 'Never'}
+                    <td>
+                      <span style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtTime(n.last_received)}</span>
                     </td>
                     <td>
                       {n.whatsapp_created ? (
-                        <span className="badge badge-green">● Connected</span>
+                        <span className="badge badge-green" style={{ fontSize: 10 }}>
+                          <i className="bi bi-whatsapp" style={{ fontSize: 10 }} />Linked
+                        </span>
                       ) : (
-                        <span className="badge badge-gray">○ None</span>
+                        <span style={{ fontSize: 11, color: 'var(--text3)' }}>—</span>
                       )}
                     </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <button
-                          style={{ padding: '4px 10px', fontSize: 11, background: 'rgba(33,150,243,.1)', border: '1px solid rgba(33,150,243,.3)', color: 'var(--blue)', borderRadius: 6, cursor: 'pointer' }}
-                          onClick={e => { e.stopPropagation(); toggleExpand(n.id, n.phone) }}
-                        >SMS</button>
-                        <a
-                          href="/whatsapp"
-                          style={{ padding: '4px 10px', fontSize: 11, background: 'rgba(37,211,102,.1)', border: '1px solid rgba(37,211,102,.3)', color: '#25d366', borderRadius: 6, cursor: 'pointer', textDecoration: 'none' }}
-                          onClick={e => e.stopPropagation()}
-                        >WA</a>
-                      </div>
+                      <i
+                        className={`bi ${expandedId === n.id ? 'bi-chevron-up' : 'bi-chevron-down'}`}
+                        style={{ color: 'var(--text3)', fontSize: 12 }}
+                      />
                     </td>
                   </tr>
+
+                  {/* Expanded SMS row */}
                   {expandedId === n.id && (
-                    <tr key={`${n.id}-exp`}>
-                      <td colSpan={8} style={{ background: 'rgba(20,20,30,.8)', padding: '16px 24px', borderTop: '1px solid var(--border)' }}>
-                        <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', marginBottom: 10 }}>Last 5 SMS for {n.phone}:</div>
-                        {(smsMap[n.id] || []).length === 0 ? (
-                          <p style={{ color: 'var(--text3)', fontSize: 12 }}>No SMS messages found for this number.</p>
-                        ) : (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {(smsMap[n.id] || []).map((s: any, i: number) => (
-                              <div key={i} style={{ display: 'flex', gap: 12, padding: '8px 12px', background: 'var(--bg)', borderRadius: 6, border: '1px solid var(--border)' }}>
-                                <span style={{ color: 'var(--text3)', fontSize: 11, whiteSpace: 'nowrap', minWidth: 80 }}>
-                                  {s.received_at ? new Date(s.received_at).toLocaleTimeString() : '-'}
-                                </span>
-                                <span style={{ color: 'var(--text2)', fontSize: 12, fontWeight: 500 }}>{s.sender}</span>
-                                <span style={{ color: 'var(--text)', fontSize: 12, flex: 1 }}>{s.body}</span>
-                                {s.otp && (
-                                  <span style={{ background: 'rgba(229,9,20,.15)', color: 'var(--accent)', padding: '2px 8px', borderRadius: 4, fontSize: 12, fontWeight: 700, fontFamily: 'monospace' }}>
-                                    {s.otp}
-                                  </span>
-                                )}
-                              </div>
-                            ))}
+                    <tr key={`exp-${n.id}`}>
+                      <td colSpan={7} style={{ padding: 0, background: 'var(--bg)' }}>
+                        <div style={{ padding: '14px 20px 18px', borderTop: '1px solid var(--border)' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                            <i className="bi bi-chat-dots-fill" style={{ color: 'var(--accent)', fontSize: 14 }} />
+                            <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: .5 }}>
+                              Live SMS for {n.phone}
+                            </span>
+                            <span className="live-badge" style={{ fontSize: 10 }}>
+                              <span className="live-dot" />5s refresh
+                            </span>
+                            <StatusBadge status={n.status} />
                           </div>
-                        )}
+
+                          {smsLoading[n.id] ? (
+                            <div style={{ color: 'var(--text3)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <i className="bi bi-arrow-repeat animate-spin" />Loading messages…
+                            </div>
+                          ) : !smsMap[n.id] || smsMap[n.id].length === 0 ? (
+                            <div style={{ color: 'var(--text3)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                              <i className="bi bi-chat-dots-fill" style={{ opacity: .3 }} />
+                              No SMS messages yet for this number. Sync iVASMS to load messages.
+                            </div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                              {smsMap[n.id].map((msg: any) => (
+                                <div key={msg.id} className="sms-item" style={{ padding: '10px 14px' }}>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                                    <div style={{
+                                      background: 'rgba(229,9,20,.1)', border: '1px solid rgba(229,9,20,.2)',
+                                      borderRadius: 6, padding: '2px 8px',
+                                      fontSize: 11, fontWeight: 600, color: 'var(--accent)',
+                                    }}>
+                                      <i className="bi bi-person-fill" style={{ marginRight: 4, fontSize: 10 }} />
+                                      {msg.sender}
+                                    </div>
+                                    {msg.service && msg.service !== 'Unknown' && (
+                                      <span className="badge badge-blue" style={{ fontSize: 10 }}>{msg.service}</span>
+                                    )}
+                                    <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>
+                                      <i className="bi bi-clock-fill" style={{ marginRight: 3, fontSize: 9 }} />
+                                      {fmtTime(msg.received_at)}
+                                    </span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12 }}>
+                                    <p style={{ fontSize: 12.5, color: 'var(--text2)', lineHeight: 1.5 }}>{msg.body}</p>
+                                    {msg.otp && (
+                                      <div style={{
+                                        background: 'rgba(229,9,20,.12)', border: '1px solid rgba(229,9,20,.35)',
+                                        color: 'var(--accent)', fontWeight: 900, fontSize: 16,
+                                        padding: '4px 12px', borderRadius: 7,
+                                        fontFamily: 'monospace', letterSpacing: 4,
+                                        whiteSpace: 'nowrap', flexShrink: 0,
+                                        boxShadow: '0 0 12px rgba(229,9,20,.15)',
+                                      }}>
+                                        <i className="bi bi-key-fill" style={{ marginRight: 6, fontSize: 12 }} />
+                                        {msg.otp}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   )}

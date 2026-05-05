@@ -2,263 +2,302 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 
-interface StatCard { icon: string; title: string; value: string | number; desc: string; color?: string }
-
-function StatCard({ icon, title, value, desc, color = 'var(--accent)' }: StatCard) {
+function StatCard({ icon, label, value, sub, color = 'var(--accent)', live = false }: any) {
   return (
-    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 22 }}>{icon}</span>
-        <span style={{ fontSize: 24, fontWeight: 800, color }}>{value}</span>
+    <div className="stat-card">
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+        <div style={{
+          width: 40, height: 40, borderRadius: 10,
+          background: `${color}18`, border: `1px solid ${color}33`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+        }}>
+          <i className={`bi ${icon}`} style={{ fontSize: 18, color }} />
+        </div>
+        {live && <span className="live-badge"><span className="live-dot" />LIVE</span>}
       </div>
-      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{title}</div>
-      <div style={{ fontSize: 12, color: 'var(--text3)' }}>{desc}</div>
+      <div style={{ fontSize: 28, fontWeight: 900, color, lineHeight: 1 }}>{value}</div>
+      <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginTop: 4 }}>{label}</div>
+      <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{sub}</div>
     </div>
   )
 }
 
-function ServiceBadge({ service }: { service: string }) {
-  const map: Record<string, string> = {
+function SvcBadge({ svc }: { svc: string }) {
+  const m: Record<string, string> = {
     Google: 'badge-blue', WhatsApp: 'badge-green', Telegram: 'badge-blue',
-    Facebook: 'badge-blue', Instagram: 'badge-orange', Twitter: 'badge-blue',
-    Amazon: 'badge-orange', Microsoft: 'badge-blue', Unknown: 'badge-gray',
+    Facebook: 'badge-blue', Instagram: 'badge-orange', Twitter: 'badge-gray',
+    Amazon: 'badge-orange', Microsoft: 'badge-blue', Apple: 'badge-gray',
+    Netflix: 'badge-red', TikTok: 'badge-gray', Unknown: 'badge-gray',
   }
-  return <span className={`badge ${map[service] || 'badge-gray'}`}>{service}</span>
+  return <span className={`badge ${m[svc] ?? 'badge-gray'}`}>{svc}</span>
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState({ numbers: 0, smsToday: 0, otpsToday: 0, whatsapp: 0 })
+  const [stats, setStats] = useState({ numbers: 0, sms: 0, otps: 0, whatsapp: 0, active: 0 })
   const [recentSMS, setRecentSMS] = useState<any[]>([])
-  const [activeNumbers, setActiveNumbers] = useState<any[]>([])
-  const [statusChecks, setStatusChecks] = useState<any[]>([])
+  const [activeNums, setActiveNums] = useState<any[]>([])
+  const [status, setStatus] = useState<any[]>([])
   const [syncing, setSyncing] = useState(false)
-  const [syncMsg, setSyncMsg] = useState('')
+  const [syncMsg, setSyncMsg] = useState<{ ok: boolean; text: string } | null>(null)
+  const [newIds, setNewIds] = useState<Set<string>>(new Set())
 
   const fetchData = useCallback(async () => {
     try {
-      const [numbersRes, smsRes, statusRes, meRes] = await Promise.all([
+      const [numR, smsR, statR, meR] = await Promise.all([
         fetch('/api/ivasms/numbers'),
-        fetch('/api/ivasms/sms?limit=10'),
+        fetch('/api/ivasms/sms?limit=15'),
         fetch('/api/status'),
         fetch('/api/auth/me'),
       ])
-
-      if (numbersRes.ok) {
-        const { numbers } = await numbersRes.json()
-        setActiveNumbers((numbers || []).slice(0, 5))
-        setStats(prev => ({ ...prev, numbers: numbers?.length || 0 }))
+      if (numR.ok) {
+        const { numbers } = await numR.json()
+        const nums = numbers || []
+        const active = nums.filter((n: any) => n.status === 'active')
+        setActiveNums(active.slice(0, 6))
+        setStats(p => ({ ...p, numbers: nums.length, active: active.length }))
       }
-      if (smsRes.ok) {
-        const { messages, total } = await smsRes.json()
-        setRecentSMS(messages || [])
-        const otps = (messages || []).filter((m: any) => m.otp).length
-        setStats(prev => ({ ...prev, smsToday: total || 0, otpsToday: otps }))
+      if (smsR.ok) {
+        const { messages, total } = await smsR.json()
+        const msgs = messages || []
+        // detect new messages
+        setRecentSMS(prev => {
+          const prevIds = new Set(prev.map((m: any) => m.id))
+          const incoming = msgs.filter((m: any) => !prevIds.has(m.id))
+          if (incoming.length > 0) {
+            setNewIds(new Set(incoming.map((m: any) => m.id)))
+            setTimeout(() => setNewIds(new Set()), 3000)
+          }
+          return msgs
+        })
+        const otps = msgs.filter((m: any) => m.otp).length
+        setStats(p => ({ ...p, sms: total || 0, otps }))
       }
-      if (statusRes.ok) {
-        const { components } = await statusRes.json()
-        setStatusChecks(components || [])
+      if (statR.ok) {
+        const { components } = await statR.json()
+        setStatus(components || [])
       }
-      if (meRes.ok) {
-        const { user } = await meRes.json()
-        setStats(prev => ({ ...prev, whatsapp: user?.has_whatsapp ? 1 : 0 }))
+      if (meR.ok) {
+        const { user } = await meR.json()
+        setStats(p => ({ ...p, whatsapp: user?.has_whatsapp ? 1 : 0 }))
       }
     } catch {}
   }, [])
 
   useEffect(() => {
     fetchData()
-    const interval = setInterval(fetchData, 15000)
-    return () => clearInterval(interval)
+    const t = setInterval(fetchData, 8000)
+    return () => clearInterval(t)
   }, [fetchData])
 
   const handleSync = async () => {
-    setSyncing(true)
-    setSyncMsg('')
+    setSyncing(true); setSyncMsg(null)
     try {
       const r = await fetch('/api/ivasms/sync', { method: 'POST' })
       const d = await r.json()
-      setSyncMsg(d.success ? `✓ Synced ${d.count} numbers` : `✗ ${d.error}`)
-      if (d.success) fetchData()
-    } catch { setSyncMsg('✗ Network error') }
-    finally { setSyncing(false); setTimeout(() => setSyncMsg(''), 4000) }
+      if (d.success) {
+        setSyncMsg({ ok: true, text: `Synced ${d.count} numbers (${d.added ?? 0} new, ${d.smsAdded ?? 0} SMS)` })
+        fetchData()
+      } else {
+        setSyncMsg({ ok: false, text: d.error || 'Sync failed' })
+      }
+    } catch { setSyncMsg({ ok: false, text: 'Network error' }) }
+    finally { setSyncing(false); setTimeout(() => setSyncMsg(null), 6000) }
   }
 
-  const formatTime = (t: string) => {
-    try { return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } catch { return t }
-  }
-
-  const statusDot = (ok: boolean) => (
-    <span className={`dot ${ok ? 'dot-green' : 'dot-red'}`} style={{ display: 'inline-block' }} />
-  )
+  const fmt = (t: string) => { try { return new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) } catch { return t } }
+  const fmtDate = (t: string) => { try { return new Date(t).toLocaleDateString() } catch { return t } }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 800, color: 'var(--text)', marginBottom: 4 }}>💀 Dashboard</h2>
-          <p style={{ color: 'var(--text3)', fontSize: 13 }}>Team Death Legion — SMS Monitoring Platform</p>
+          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)', letterSpacing: -.3 }}>Overview</h2>
+          <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 2 }}>
+            Real-time SMS monitoring · Auto-refresh every 8s
+          </p>
         </div>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          {syncMsg && <span style={{ fontSize: 12, color: syncMsg.startsWith('✓') ? 'var(--green)' : 'var(--accent)', padding: '4px 10px', background: 'var(--bg2)', borderRadius: 6 }}>{syncMsg}</span>}
-          <button onClick={handleSync} disabled={syncing} className="btn-primary" style={{ fontSize: 13, padding: '8px 16px', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <span style={{ display: 'inline-block', animation: syncing ? 'spin 1s linear infinite' : 'none' }}>⟳</span>
-            Sync iVASMS
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {syncMsg && (
+            <div className={`alert ${syncMsg.ok ? 'alert-success' : 'alert-error'}`} style={{ padding: '6px 12px', fontSize: 12 }}>
+              <i className={`bi ${syncMsg.ok ? 'bi-check2' : 'bi-exclamation-triangle-fill'}`} />
+              {syncMsg.text}
+            </div>
+          )}
+          <button onClick={handleSync} disabled={syncing} className="btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px', fontSize: 13 }}>
+            <i className="bi bi-arrow-repeat" style={{ animation: syncing ? 'spin 1s linear infinite' : 'none', display: 'inline-block', fontSize: 15 }} />
+            {syncing ? 'Syncing…' : 'Sync iVASMS'}
           </button>
         </div>
       </div>
 
-      {/* Stats row */}
+      {/* ── Stats ── */}
       <div className="stats-grid">
-        <StatCard icon="📱" title="Total Numbers" value={stats.numbers} desc="Numbers synced from iVASMS" />
-        <StatCard icon="📨" title="SMS Total" value={stats.smsToday} desc="Messages in database" color="var(--blue)" />
-        <StatCard icon="🔑" title="OTPs Extracted" value={stats.otpsToday} desc="Verification codes found" color="#ff9800" />
-        <StatCard icon="💬" title="WhatsApp" value={stats.whatsapp > 0 ? '● Active' : '○ None'} desc="WhatsApp accounts active" color={stats.whatsapp > 0 ? 'var(--green)' : 'var(--text3)'} />
+        <StatCard icon="bi-phone-fill" label="Total Numbers" value={stats.numbers} sub={`${stats.active} active`} color="var(--accent)" />
+        <StatCard icon="bi-chat-dots-fill" label="Total SMS" value={stats.sms.toLocaleString()} sub="Messages received" color="var(--blue)" live />
+        <StatCard icon="bi-key-fill" label="OTPs Extracted" value={stats.otps} sub="Verification codes" color="var(--orange)" />
+        <StatCard icon="bi-whatsapp" label="WhatsApp" value={stats.whatsapp > 0 ? 'Active' : 'None'} sub={stats.whatsapp > 0 ? 'Account linked' : 'Not configured'} color={stats.whatsapp > 0 ? 'var(--green)' : 'var(--text3)'} />
       </div>
 
-      {/* Two columns */}
+      {/* ── Two columns ── */}
       <div className="two-col">
-        {/* Recent SMS */}
-        <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>📨 Recent SMS</h3>
+
+        {/* Recent SMS (live) */}
+        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '16px 20px', borderBottom: '1px solid var(--border)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <i className="bi bi-chat-dots-fill" style={{ color: 'var(--accent)', fontSize: 16 }} />
+              <span style={{ fontWeight: 700, fontSize: 14 }}>Live SMS Feed</span>
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="dot dot-green" style={{ animation: 'pulse 2s infinite' }} />
-              <span style={{ fontSize: 11, color: 'var(--green)' }}>Live</span>
-              <Link href="/sms-history" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none' }}>View all →</Link>
+              <span className="live-badge"><span className="live-dot" />8s refresh</span>
+              <Link href="/sms-history" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 4 }}>
+                All <i className="bi bi-chevron-right" style={{ fontSize: 10 }} />
+              </Link>
             </div>
           </div>
-          {recentSMS.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text3)' }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📭</div>
-              <p style={{ fontSize: 13 }}>No SMS yet. Sync iVASMS to load messages.</p>
-            </div>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              {recentSMS.map((sms: any) => (
-                <div key={sms.id} style={{
-                  padding: '10px 12px', borderRadius: 8, background: 'var(--bg2)',
-                  border: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start',
-                  gap: 12, transition: 'border-color .2s', cursor: 'default',
-                }}
-                  onMouseEnter={e => (e.currentTarget.style.borderColor = 'rgba(229,9,20,.3)')}
-                  onMouseLeave={e => (e.currentTarget.style.borderColor = 'var(--border)')}
-                >
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-                      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{sms.phone_number || sms.sender}</span>
-                      <span style={{ fontSize: 10, color: 'var(--text3)' }}>{formatTime(sms.received_at)}</span>
-                      <ServiceBadge service={sms.service || 'Unknown'} />
+          <div style={{ maxHeight: 420, overflowY: 'auto' }}>
+            {recentSMS.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text3)' }}>
+                <i className="bi bi-chat-dots-fill" style={{ fontSize: 36, display: 'block', marginBottom: 12, opacity: .3 }} />
+                <p style={{ fontSize: 13 }}>No SMS yet. Sync iVASMS to load messages.</p>
+                <button onClick={handleSync} className="btn-primary btn-sm" style={{ marginTop: 12 }}>
+                  <i className="bi bi-arrow-repeat" style={{ marginRight: 6 }} />Sync Now
+                </button>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '8px' }}>
+                {recentSMS.map((sms: any) => (
+                  <div key={sms.id} className={`sms-item ${newIds.has(sms.id) ? 'new-sms' : ''}`}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: 'monospace' }}>
+                        {sms.phone_number || sms.sender}
+                      </span>
+                      <SvcBadge svc={sms.service || 'Unknown'} />
+                      <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text3)' }}>
+                        <i className="bi bi-clock-fill" style={{ marginRight: 3 }} />{fmt(sms.received_at)}
+                      </span>
                     </div>
-                    <p style={{ fontSize: 12, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {sms.body}
-                    </p>
+                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                      <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, flex: 1 }}>{sms.body}</p>
+                      {sms.otp && (
+                        <span style={{
+                          background: 'rgba(229,9,20,.12)', border: '1px solid rgba(229,9,20,.35)',
+                          color: 'var(--accent)', fontWeight: 900, fontSize: 15,
+                          padding: '3px 10px', borderRadius: 7,
+                          fontFamily: 'monospace', letterSpacing: 3, whiteSpace: 'nowrap', flexShrink: 0,
+                        }}>{sms.otp}</span>
+                      )}
+                    </div>
                   </div>
-                  {sms.otp && (
-                    <span style={{
-                      background: 'rgba(229,9,20,.15)', border: '1px solid rgba(229,9,20,.4)',
-                      color: 'var(--accent)', fontWeight: 800, fontSize: 14,
-                      padding: '2px 8px', borderRadius: 6, fontFamily: 'monospace',
-                      whiteSpace: 'nowrap', letterSpacing: 2,
-                    }}>{sms.otp}</span>
-                  )}
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right panel */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          {/* Active Numbers */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <i className="bi bi-phone-fill" style={{ color: 'var(--green)', fontSize: 14 }} />
+                <span style={{ fontWeight: 700, fontSize: 13 }}>Active Numbers</span>
+                <span className="badge badge-green">{stats.active}</span>
+              </div>
+              <Link href="/numbers" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none' }}>
+                All <i className="bi bi-chevron-right" style={{ fontSize: 10 }} />
+              </Link>
+            </div>
+            {activeNums.length === 0 ? (
+              <div style={{ padding: '24px', textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>
+                <i className="bi bi-phone-fill" style={{ fontSize: 28, display: 'block', marginBottom: 8, opacity: .3 }} />
+                No numbers yet
+              </div>
+            ) : (
+              <div style={{ padding: '8px' }}>
+                {activeNums.map((n: any) => (
+                  <div key={n.id} style={{
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    padding: '8px 10px', borderRadius: 7,
+                    transition: 'background .15s', cursor: 'default',
+                  }}
+                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
+                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <span style={{ fontSize: 18 }}>{n.flag || '🏳️'}</span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, fontWeight: 600, fontFamily: 'monospace', color: 'var(--text)' }}>{n.phone}</div>
+                      <div style={{ fontSize: 11, color: 'var(--text3)' }}>{n.country}</div>
+                    </div>
+                    <span className="badge badge-green" style={{ fontSize: 10 }}>
+                      <i className="bi bi-circle-fill" style={{ fontSize: 7 }} />Active
+                    </span>
+                    <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+                      <i className="bi bi-chat-dots-fill" style={{ marginRight: 3, fontSize: 10 }} />{n.sms_count || 0}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* System Status mini */}
+          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <i className="bi bi-activity" style={{ color: 'var(--green)', fontSize: 14 }} />
+                <span style={{ fontWeight: 700, fontSize: 13 }}>System Health</span>
+              </div>
+              <Link href="/status" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none' }}>View <i className="bi bi-chevron-right" style={{ fontSize: 10 }} /></Link>
+            </div>
+            <div style={{ padding: '10px' }}>
+              {status.slice(0, 5).map((c: any) => (
+                <div key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '7px 8px', borderRadius: 7 }}>
+                  <span className={`dot ${c.ok ? 'dot-green dot-pulse' : 'dot-red'}`} />
+                  <span style={{ flex: 1, fontSize: 12, color: 'var(--text)' }}>{c.name}</span>
+                  <span style={{ fontSize: 11, color: c.ok ? 'var(--green)' : 'var(--accent)' }}>
+                    {c.ok ? 'Operational' : 'Down'}
+                    {c.latency > 0 && <span style={{ color: 'var(--text3)', marginLeft: 5 }}>{c.latency}ms</span>}
+                  </span>
                 </div>
               ))}
             </div>
-          )}
-        </div>
-
-        {/* Active Numbers */}
-        <div className="card">
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
-            <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>📱 Active Numbers</h3>
-            <Link href="/numbers" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none' }}>View all →</Link>
           </div>
-          {activeNumbers.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text3)' }}>
-              <div style={{ fontSize: 32, marginBottom: 8 }}>📵</div>
-              <p style={{ fontSize: 13 }}>No numbers yet. Sync from iVASMS.</p>
-              <button onClick={handleSync} className="btn-primary" style={{ marginTop: 12, padding: '8px 16px', fontSize: 12 }}>
-                ⟳ Sync Now
-              </button>
-            </div>
-          ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Number</th>
-                  <th>Country</th>
-                  <th>Status</th>
-                  <th>SMS</th>
-                </tr>
-              </thead>
-              <tbody>
-                {activeNumbers.map((n: any) => (
-                  <tr key={n.id}>
-                    <td style={{ fontFamily: 'monospace', fontSize: 12 }}>{n.flag} {n.phone}</td>
-                    <td style={{ fontSize: 12, color: 'var(--text3)' }}>{n.country}</td>
-                    <td><span className={`badge ${n.status === 'active' ? 'badge-green' : 'badge-red'}`}>{n.status}</span></td>
-                    <td style={{ color: 'var(--text2)', fontSize: 12 }}>{n.sms_count || 0}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
 
-      {/* Quick Actions */}
-      <div className="card">
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 16 }}>⚡ Quick Actions</h3>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-          {[
-            { label: '⟳ Sync iVASMS', action: handleSync, color: 'var(--accent)' },
-            { label: '💬 Create WhatsApp', href: '/whatsapp', color: '#25d366' },
-            { label: '🤖 Setup Telegram Bot', href: '/telegram-bot', color: '#229ed9' },
-            { label: '✅ Start Verification', href: '/verification', color: '#ff9800' },
-            { label: '📊 View Status', href: '/status', color: 'var(--green)' },
-          ].map(item => (
-            item.href ? (
-              <Link key={item.label} href={item.href} style={{
-                padding: '10px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                background: `${item.color}15`, border: `1px solid ${item.color}44`,
-                color: item.color, textDecoration: 'none', transition: 'all .2s',
-                display: 'inline-flex', alignItems: 'center', gap: 6,
-              }}>
-                {item.label}
-              </Link>
-            ) : (
-              <button key={item.label} onClick={item.action} style={{
-                padding: '10px 18px', borderRadius: 8, fontSize: 13, fontWeight: 600,
-                background: `${item.color}15`, border: `1px solid ${item.color}44`,
-                color: item.color, cursor: 'pointer', transition: 'all .2s',
-              }}>
-                {item.label}
-              </button>
-            )
-          ))}
-        </div>
-      </div>
-
-      {/* System Status mini */}
-      <div className="card">
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 16 }}>🟢 System Status</h3>
-        <div className="three-col">
-          {statusChecks.slice(0, 6).map((c: any) => (
-            <div key={c.name} style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '10px 14px', background: 'var(--bg2)', borderRadius: 8,
-              border: '1px solid var(--border)',
-            }}>
-              {statusDot(c.ok)}
-              <div>
-                <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text)' }}>{c.name}</div>
-                <div style={{ fontSize: 11, color: c.ok ? 'var(--green)' : 'var(--accent)' }}>
-                  {c.ok ? 'Operational' : 'Degraded'} {c.latency > 0 ? `· ${c.latency}ms` : ''}
-                </div>
-              </div>
+          {/* Quick Actions */}
+          <div className="card">
+            <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12 }}>
+              <i className="bi bi-lightning-fill" style={{ marginRight: 6, color: 'var(--orange)' }} />Quick Actions
             </div>
-          ))}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              {[
+                { label: 'Verification', href: '/verification', icon: 'bi-shield-check', color: 'var(--green)' },
+                { label: 'WhatsApp', href: '/whatsapp', icon: 'bi-whatsapp', color: '#25d366' },
+                { label: 'Telegram Bot', href: '/telegram-bot', icon: 'bi-telegram', color: '#229ed9' },
+                { label: 'DLChat PWA', href: '/mobile', icon: 'bi-android2', color: 'var(--blue)' },
+              ].map(a => (
+                <Link key={a.label} href={a.href} style={{
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
+                  padding: '12px 8px', borderRadius: 8, textDecoration: 'none',
+                  background: `${a.color}10`, border: `1px solid ${a.color}25`,
+                  transition: 'all .2s',
+                }}
+                  onMouseEnter={e => { (e.currentTarget as any).style.background = `${a.color}20`; (e.currentTarget as any).style.borderColor = `${a.color}50` }}
+                  onMouseLeave={e => { (e.currentTarget as any).style.background = `${a.color}10`; (e.currentTarget as any).style.borderColor = `${a.color}25` }}
+                >
+                  <i className={`bi ${a.icon}`} style={{ fontSize: 20, color: a.color }} />
+                  <span style={{ fontSize: 11, fontWeight: 600, color: a.color }}>{a.label}</span>
+                </Link>
+              ))}
+            </div>
+          </div>
         </div>
       </div>
     </div>

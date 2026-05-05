@@ -1,17 +1,17 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 
-function UptimeBar({ uptime }: { uptime: number }) {
-  const bars = 90
+function UptimeBar({ pct }: { pct: number }) {
+  const bars = 30
   return (
-    <div className="uptime-bar" style={{ gap: 2 }}>
-      {Array.from({ length: bars }, (_, i) => {
-        const rand = Math.random()
-        const color = rand > 0.02 ? 'var(--green)' : rand > 0.01 ? '#ff9800' : 'var(--accent)'
+    <div className="uptime-bar">
+      {Array.from({ length: bars }).map((_, i) => {
+        const ok = i < Math.floor((pct / 100) * bars)
         return (
           <div key={i} className="uptime-bar-item" style={{
-            width: 3, height: 16 + Math.random() * 8,
-            background: color, borderRadius: 2, opacity: 0.8,
+            height: 8 + (ok ? Math.random() * 12 : 0),
+            background: ok ? 'var(--green)' : 'var(--border2)',
+            opacity: ok ? 0.7 + Math.random() * 0.3 : 1,
           }} />
         )
       })}
@@ -22,139 +22,142 @@ function UptimeBar({ uptime }: { uptime: number }) {
 export default function StatusPage() {
   const [data, setData] = useState<any>(null)
   const [loading, setLoading] = useState(true)
-  const [email, setEmail] = useState('')
-  const [subscribed, setSubscribed] = useState(false)
+  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
 
   const fetchStatus = useCallback(async () => {
     try {
       const r = await fetch('/api/status')
-      if (r.ok) setData(await r.json())
+      if (r.ok) {
+        const d = await r.json()
+        setData(d)
+        setLastUpdate(new Date())
+      }
     } catch {}
     setLoading(false)
   }, [])
 
   useEffect(() => {
     fetchStatus()
-    const interval = setInterval(fetchStatus, 60000)
-    return () => clearInterval(interval)
+    const t = setInterval(fetchStatus, 15000)
+    return () => clearInterval(t)
   }, [fetchStatus])
 
   const overallOk = data?.overall === 'operational'
-  const overallColor = overallOk ? 'var(--green)' : '#ff9800'
+  const allOk = data?.components?.every((c: any) => c.ok)
 
-  const statusIcon: Record<string, string> = {
-    'API Service': '⚙️',
-    'iVASMS Connection': '🔗',
-    'SMS Receiving': '📨',
-    'WhatsApp Service': '💬',
-    'Telegram Bot': '✈️',
-    'Database': '🗄️',
+  const icons: Record<string, string> = {
+    'API Service': 'bi-cloud-fill',
+    'iVASMS Connection': 'bi-phone-fill',
+    'SMS Receiving': 'bi-chat-dots-fill',
+    'WhatsApp Service': 'bi-whatsapp',
+    'Telegram Bot': 'bi-telegram',
+    'Database': 'bi-database-fill',
   }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {/* Header */}
-      <div style={{ textAlign: 'center', padding: '32px 20px' }}>
-        <div style={{ fontSize: 36, marginBottom: 12 }}>💀</div>
-        <h1 style={{ fontSize: 26, fontWeight: 800, color: 'var(--text)', marginBottom: 6 }}>
-          DL SMS — System Status
-        </h1>
-        <p style={{ color: 'var(--text3)', fontSize: 13 }}>Team Death Legion · Realtime Monitoring</p>
-      </div>
-
-      {/* Overall banner */}
-      <div style={{
-        padding: '20px 28px',
-        background: overallOk ? 'rgba(0,200,83,.08)' : 'rgba(255,152,0,.08)',
-        border: `1px solid ${overallColor}44`,
-        borderRadius: 12, display: 'flex', alignItems: 'center', gap: 14,
-      }}>
-        <span className={`dot ${overallOk ? 'dot-green' : 'dot-yellow'}`} style={{ width: 14, height: 14, animation: 'pulse 2s infinite' }} />
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <div style={{ fontSize: 18, fontWeight: 800, color: overallColor }}>
-            {loading ? 'Checking...' : overallOk ? 'All Systems Operational' : 'Some Systems Degraded'}
+          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)' }}>System Status</h2>
+          <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 2 }}>
+            Real-time health of all services · Auto-refresh 15s
+          </p>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span className="live-badge"><span className="live-dot" />Live</span>
+          {lastUpdate && (
+            <span style={{ fontSize: 11, color: 'var(--text3)' }}>
+              Updated {lastUpdate.toLocaleTimeString()}
+            </span>
+          )}
+          <button onClick={fetchStatus} className="btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <i className="bi bi-arrow-repeat" style={{ fontSize: 13 }} />Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Overall status banner */}
+      <div style={{
+        padding: '20px 24px', borderRadius: 'var(--radius)',
+        background: allOk ? 'rgba(0,230,118,.06)' : 'rgba(229,9,20,.06)',
+        border: `2px solid ${allOk ? 'rgba(0,230,118,.3)' : 'rgba(229,9,20,.3)'}`,
+        display: 'flex', alignItems: 'center', gap: 16,
+      }}>
+        <div style={{
+          width: 52, height: 52, borderRadius: 14,
+          background: allOk ? 'var(--green-dim)' : 'rgba(229,9,20,.12)',
+          border: `2px solid ${allOk ? 'rgba(0,230,118,.3)' : 'rgba(229,9,20,.3)'}`,
+          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
+        }}>
+          <i className={`bi ${allOk ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'}`}
+            style={{ fontSize: 24, color: allOk ? 'var(--green)' : 'var(--accent)' }} />
+        </div>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: allOk ? 'var(--green)' : 'var(--accent)' }}>
+            {allOk ? 'All Systems Operational' : 'Some Systems Degraded'}
           </div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 2 }}>
-            Last updated: {data?.updatedAt ? new Date(data.updatedAt).toLocaleString() : 'Loading...'}
+          <div style={{ fontSize: 13, color: 'var(--text3)', marginTop: 4 }}>
+            {data?.components?.filter((c: any) => c.ok).length ?? 0} of {data?.components?.length ?? 0} services online
+            {data?.updatedAt && ` · Last checked ${new Date(data.updatedAt).toLocaleTimeString()}`}
           </div>
         </div>
       </div>
 
-      {/* Components grid */}
-      <div>
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 14 }}>Components</h2>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '32px', color: 'var(--text3)' }}>
-            <span style={{ fontSize: 28, display: 'inline-block', animation: 'spin 1s linear infinite' }}>⟳</span>
-          </div>
-        ) : (
-          <div className="two-col-eq">
-            {(data?.components || []).map((c: any) => (
-              <div key={c.name} className="card">
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 20 }}>{statusIcon[c.name] || '⚡'}</span>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>{c.name}</div>
-                      {c.latency > 0 && (
-                        <div style={{ fontSize: 11, color: 'var(--text3)' }}>{c.latency}ms latency</div>
-                      )}
-                    </div>
-                  </div>
-                  <span className={`badge ${c.ok ? 'badge-green' : 'badge-red'}`}>
-                    {c.ok ? '● Operational' : '● Degraded'}
-                  </span>
+      {/* Component cards */}
+      {loading ? (
+        <div style={{ padding: 48, textAlign: 'center' }}>
+          <i className="bi bi-arrow-repeat animate-spin" style={{ fontSize: 32, color: 'var(--accent)', display: 'block', marginBottom: 12 }} />
+          <p style={{ color: 'var(--text3)', fontSize: 13 }}>Checking services…</p>
+        </div>
+      ) : (
+        <div className="three-col">
+          {(data?.components || []).map((c: any) => (
+            <div key={c.name} className="card card-hover" style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 14 }}>
+                <div style={{
+                  width: 40, height: 40, borderRadius: 10,
+                  background: c.ok ? 'rgba(0,230,118,.1)' : 'rgba(229,9,20,.1)',
+                  border: `1px solid ${c.ok ? 'rgba(0,230,118,.25)' : 'rgba(229,9,20,.25)'}`,
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <i className={`bi ${icons[c.name] || 'bi-cpu-fill'}`}
+                    style={{ fontSize: 18, color: c.ok ? 'var(--green)' : 'var(--accent)' }} />
                 </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <span style={{ fontSize: 11, color: 'var(--text3)' }}>90-day uptime</span>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: c.uptime >= 99 ? 'var(--green)' : '#ff9800' }}>
-                    {c.uptime?.toFixed(2)}%
-                  </span>
-                </div>
-
-                <UptimeBar uptime={c.uptime} />
+                <span className={`badge ${c.ok ? 'badge-green' : 'badge-red'}`}>
+                  {c.ok ? <><i className="bi bi-check2" />Operational</> : <><i className="bi bi-exclamation-triangle-fill" />Degraded</>}
+                </span>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Incidents */}
-      <div>
-        <h2 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)', marginBottom: 14 }}>Recent Incidents</h2>
-        <div className="card" style={{ textAlign: 'center', padding: '32px' }}>
-          <div style={{ fontSize: 28, marginBottom: 8 }}>✅</div>
-          <div style={{ fontSize: 14, color: 'var(--green)', fontWeight: 600 }}>No incidents in the past 90 days</div>
-          <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 4 }}>All systems running smoothly</div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)', marginBottom: 8 }}>{c.name}</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 12 }}>
+                <div style={{ background: 'var(--bg2)', borderRadius: 7, padding: '8px 10px' }}>
+                  <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Latency</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: c.latency < 100 ? 'var(--green)' : c.latency < 500 ? 'var(--orange)' : 'var(--accent)' }}>
+                    {c.latency > 0 ? `${c.latency}ms` : '—'}
+                  </div>
+                </div>
+                <div style={{ background: 'var(--bg2)', borderRadius: 7, padding: '8px 10px' }}>
+                  <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Uptime</div>
+                  <div style={{ fontSize: 16, fontWeight: 800, color: 'var(--green)' }}>
+                    {c.uptime?.toFixed(2)}%
+                  </div>
+                </div>
+              </div>
+              <UptimeBar pct={c.uptime || 0} />
+              <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 6 }}>Last 30 checks</div>
+            </div>
+          ))}
         </div>
-      </div>
+      )}
 
-      {/* Subscribe */}
-      <div className="card" style={{ textAlign: 'center', padding: '28px' }}>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', marginBottom: 8 }}>
-          🔔 Subscribe to Updates
-        </h3>
-        <p style={{ color: 'var(--text3)', fontSize: 13, marginBottom: 16 }}>
-          Get notified when there are service disruptions
-        </p>
-        {subscribed ? (
-          <div style={{ color: 'var(--green)', fontSize: 13, fontWeight: 500 }}>✓ Subscribed! You'll receive incident alerts.</div>
-        ) : (
-          <form onSubmit={e => { e.preventDefault(); if (email) setSubscribed(true) }}
-            style={{ display: 'flex', gap: 10, maxWidth: 360, margin: '0 auto' }}>
-            <input type="email" placeholder="Enter email address..." value={email}
-              onChange={e => setEmail(e.target.value)} required style={{ flex: 1 }} />
-            <button type="submit" className="btn-primary" style={{ padding: '10px 18px', whiteSpace: 'nowrap' }}>
-              Subscribe
-            </button>
-          </form>
-        )}
-      </div>
-
-      {/* Footer */}
-      <div style={{ textAlign: 'center', padding: '12px 0', color: 'var(--text3)', fontSize: 12, borderTop: '1px solid var(--border)' }}>
-        💀 DL SMS Client · TEAM DEATH LEGION · Auto-refreshes every 60s
+      {/* Info */}
+      <div className="card alert-info" style={{ display: 'flex', gap: 12 }}>
+        <i className="bi bi-info-circle-fill" style={{ color: 'var(--blue)', fontSize: 18, flexShrink: 0, marginTop: 2 }} />
+        <div style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.6 }}>
+          <strong style={{ color: 'var(--text)' }}>Note:</strong> For production deployment, bind a <strong>Cloudflare KV namespace</strong> named
+          <code style={{ background: 'var(--bg2)', padding: '1px 5px', borderRadius: 4, margin: '0 3px', fontSize: 12 }}>DLSMS_KV</code>
+          to persist data across requests. Without KV, data resets on each new edge invocation.
+          Add iVASMS credentials in <strong>Settings</strong> to enable real number sync and live SMS polling.
+        </div>
       </div>
     </div>
   )

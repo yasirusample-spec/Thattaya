@@ -3,48 +3,36 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useState, useEffect } from 'react'
 
-interface NavItem { href: string; icon: string; label: string; beta?: boolean }
-interface NavSection { label: string; items: NavItem[] }
-
-const navSections: NavSection[] = [
-  {
-    label: 'MAIN',
-    items: [
-      { href: '/', icon: '📊', label: 'Dashboard' },
-      { href: '/numbers', icon: '📱', label: 'Numbers' },
-      { href: '/sms-history', icon: '📨', label: 'SMS History' },
-      { href: '/verification', icon: '✅', label: 'Verification' },
-    ],
-  },
-  {
-    label: 'BETA',
-    items: [
-      { href: '/whatsapp', icon: '💬', label: 'WhatsApp', beta: true },
-    ],
-  },
-  {
-    label: 'SYSTEM',
-    items: [
-      { href: '/status', icon: '🟢', label: 'Status' },
-      { href: '/telegram-bot', icon: '✈️', label: 'Telegram Bot' },
-      { href: '/settings', icon: '⚙️', label: 'Settings' },
-    ],
-  },
+const NAV = [
+  { section: 'MAIN', items: [
+    { href: '/',            icon: 'bi-speedometer2',    label: 'Dashboard' },
+    { href: '/numbers',     icon: 'bi-phone-fill',      label: 'Numbers' },
+    { href: '/sms-history', icon: 'bi-chat-dots-fill',  label: 'SMS History' },
+    { href: '/verification',icon: 'bi-shield-check',    label: 'Verification' },
+  ]},
+  { section: 'SERVICES', items: [
+    { href: '/chat',        icon: 'bi-chat-square-dots-fill', label: 'DL Chat',     hot: true },
+    { href: '/whatsapp',    icon: 'bi-whatsapp',        label: 'WhatsApp',    beta: true },
+    { href: '/telegram-bot',icon: 'bi-telegram',        label: 'Telegram Bot' },
+    { href: '/mobile',      icon: 'bi-android2',        label: 'DLChat PWA' },
+  ]},
+  { section: 'SYSTEM', items: [
+    { href: '/status',   icon: 'bi-activity',  label: 'Status' },
+    { href: '/settings', icon: 'bi-gear-fill', label: 'Settings' },
+  ]},
 ]
 
 export default function Sidebar() {
   const pathname = usePathname()
-  const router = useRouter()
-  const [user, setUser] = useState<any>(null)
-  const [ivasConnected, setIvasConnected] = useState(false)
+  const router   = useRouter()
+  const [user,    setUser]    = useState<any>(null)
+  const [ivasOk,  setIvasOk]  = useState(false)
 
   useEffect(() => {
-    fetch('/api/auth/me').then(r => r.json()).then(d => {
-      if (d.user) {
-        setUser(d.user)
-        setIvasConnected(!!d.user.ivasms_email)
-      }
-    }).catch(() => {})
+    fetch('/api/auth/me')
+      .then(r => r.json())
+      .then(d => { if (d.user) { setUser(d.user); setIvasOk(!!d.user.ivasms_email) } })
+      .catch(() => {})
   }, [])
 
   const handleLogout = async () => {
@@ -52,98 +40,128 @@ export default function Sidebar() {
     router.push('/login')
   }
 
-  const initials = user?.name ? user.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0,2) : 'AD'
+  const initials = user?.name
+    ? user.name.split(' ').map((w: string) => w[0]).join('').toUpperCase().slice(0, 2)
+    : 'AD'
 
   return (
     <aside style={{
-      position: 'fixed', left: 0, top: 0, bottom: 0, width: 260,
-      background: 'var(--bg2)', borderRight: '1px solid var(--border)',
-      display: 'flex', flexDirection: 'column', zIndex: 100, overflowY: 'auto',
+      position: 'fixed', left: 0, top: 0, bottom: 0,
+      width: 'var(--sidebar-w)',
+      background: 'var(--bg2)',
+      borderRight: '1px solid var(--border)',
+      display: 'flex', flexDirection: 'column',
+      zIndex: 200, overflowY: 'auto',
     }}>
-      {/* Brand */}
-      <div style={{ padding: '20px 16px', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-          <div style={{
-            width: 36, height: 36, background: 'var(--accent)', borderRadius: 8,
-            display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18,
-            boxShadow: '0 0 12px rgba(229,9,20,.4)',
-          }}>💀</div>
-          <div>
-            <div style={{ color: 'var(--accent)', fontWeight: 800, fontSize: 16, letterSpacing: 1 }}>DL SMS</div>
-            <div style={{ color: 'var(--text3)', fontSize: 9, letterSpacing: 2, textTransform: 'uppercase' }}>SMSTEAM DEATH LEGION</div>
+
+      {/* ── Brand ── */}
+      <div style={{ padding: '16px 16px 12px', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <img src="/logo.svg" alt="DL" style={{ width: 38, height: 38, borderRadius: 9, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: 'var(--accent)', fontWeight: 900, fontSize: 16, letterSpacing: 1, lineHeight: 1.1 }}>DL SMS</div>
+            <div style={{ color: 'var(--text3)', fontSize: 8, letterSpacing: 2, textTransform: 'uppercase', marginTop: 2 }}>TEAM DEATH LEGION</div>
           </div>
         </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8 }}>
-          <span className={`dot ${ivasConnected ? 'dot-green' : 'dot-red'}`} style={{ animation: ivasConnected ? 'pulse 2s infinite' : 'none' }} />
-          <span style={{ fontSize: 11, color: ivasConnected ? 'var(--green)' : 'var(--accent)', fontWeight: 500 }}>
-            {ivasConnected ? 'iVAS Connected' : 'iVAS Disconnected'}
+
+        {/* iVASMS status pill */}
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 6,
+          marginTop: 10, padding: '6px 10px',
+          background: ivasOk ? 'rgba(0,230,118,.06)' : 'rgba(229,9,20,.06)',
+          border: `1px solid ${ivasOk ? 'rgba(0,230,118,.2)' : 'rgba(229,9,20,.2)'}`,
+          borderRadius: 8,
+        }}>
+          <span className={`dot ${ivasOk ? 'dot-green dot-pulse' : 'dot-red'}`} />
+          <span style={{ fontSize: 11, color: ivasOk ? 'var(--green)' : 'var(--accent)', fontWeight: 600 }}>
+            {ivasOk ? 'iVASMS Connected' : 'iVASMS Disconnected'}
           </span>
+          {ivasOk && (
+            <span className="live-badge" style={{ marginLeft: 'auto', fontSize: 9 }}>
+              <span className="live-dot" />LIVE
+            </span>
+          )}
         </div>
       </div>
 
-      {/* Nav */}
-      <nav style={{ flex: 1, padding: '12px 0' }}>
-        {navSections.map(section => (
-          <div key={section.label} style={{ marginBottom: 8 }}>
+      {/* ── Nav sections ── */}
+      <div style={{ flex: 1, padding: '6px 0', overflowY: 'auto' }}>
+        {NAV.map(({ section, items }) => (
+          <div key={section} style={{ marginBottom: 2 }}>
             <div style={{
-              padding: '6px 16px 4px',
-              color: 'var(--text3)', fontSize: 10,
-              fontWeight: 700, letterSpacing: 1.5, textTransform: 'uppercase',
-            }}>{section.label}</div>
-            {section.items.map(item => {
-              const isActive = pathname === item.href || (item.href !== '/' && pathname.startsWith(item.href))
+              padding: '10px 18px 4px',
+              fontSize: 9, fontWeight: 700, letterSpacing: 1.5,
+              color: 'var(--text3)', textTransform: 'uppercase',
+            }}>{section}</div>
+            {items.map((item: any) => {
+              const active = pathname === item.href ||
+                (item.href !== '/' && pathname.startsWith(item.href))
               return (
                 <Link
                   key={item.href}
                   href={item.href}
-                  className={`nav-item ${isActive ? 'nav-active' : ''}`}
-                  style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}
+                  className={`nav-item ${active ? 'nav-active' : ''}`}
                 >
-                  <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    <span style={{ fontSize: 15 }}>{item.icon}</span>
-                    <span style={{ fontWeight: isActive ? 600 : 400 }}>{item.label}</span>
-                  </span>
+                  <i className={`bi ${item.icon}`} style={{ fontSize: 16, flexShrink: 0 }} />
+                  <span style={{ flex: 1 }}>{item.label}</span>
+                  {item.hot && (
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, letterSpacing: .5,
+                      background: 'rgba(229,9,20,.15)', color: 'var(--accent)',
+                      border: '1px solid rgba(229,9,20,.3)',
+                      padding: '1px 5px', borderRadius: 4,
+                    }}>NEW</span>
+                  )}
                   {item.beta && (
-                    <span className="badge badge-red" style={{ fontSize: 9, padding: '1px 6px' }}>BETA</span>
+                    <span style={{
+                      fontSize: 9, fontWeight: 700, letterSpacing: .5,
+                      background: 'rgba(170,0,255,.15)', color: 'var(--purple)',
+                      border: '1px solid rgba(170,0,255,.3)',
+                      padding: '1px 5px', borderRadius: 4,
+                    }}>BETA</span>
+                  )}
+                  {active && (
+                    <i className="bi bi-chevron-right" style={{ fontSize: 11, color: 'var(--accent)', opacity: .7 }} />
                   )}
                 </Link>
               )
             })}
           </div>
         ))}
-      </nav>
+      </div>
 
-      {/* User */}
-      <div style={{ padding: '16px', borderTop: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+      {/* ── User footer ── */}
+      <div style={{ borderTop: '1px solid var(--border)', padding: '12px 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <div style={{
-            width: 32, height: 32, borderRadius: '50%',
+            width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
             background: 'linear-gradient(135deg, var(--accent), #7b0000)',
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: '#fff', fontWeight: 700, fontSize: 12, flexShrink: 0,
+            color: '#fff', fontWeight: 800, fontSize: 12,
+            border: '2px solid rgba(229,9,20,.3)',
           }}>{initials}</div>
-          <div style={{ overflow: 'hidden' }}>
-            <div style={{ color: 'var(--text)', fontSize: 13, fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {user?.name || 'Admin'}
             </div>
-            <div style={{ color: 'var(--text3)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {user?.email || 'admin@dlsms.com'}
+            <div style={{ fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user?.email || ''}
             </div>
           </div>
+          <button
+            onClick={handleLogout}
+            title="Logout"
+            style={{
+              background: 'transparent', border: 'none',
+              color: 'var(--text3)', cursor: 'pointer', padding: 6,
+              borderRadius: 6, transition: 'color .2s', flexShrink: 0,
+            }}
+            onMouseEnter={e => (e.currentTarget.style.color = 'var(--accent)')}
+            onMouseLeave={e => (e.currentTarget.style.color = 'var(--text3)')}
+          >
+            <i className="bi bi-box-arrow-right" style={{ fontSize: 17 }} />
+          </button>
         </div>
-        <button
-          onClick={handleLogout}
-          style={{
-            width: '100%', padding: '8px', background: 'rgba(229,9,20,.1)',
-            border: '1px solid rgba(229,9,20,.3)', borderRadius: 8,
-            color: 'var(--accent)', fontSize: 12, fontWeight: 600,
-            cursor: 'pointer', transition: 'all .2s',
-          }}
-          onMouseEnter={e => (e.currentTarget.style.background = 'rgba(229,9,20,.2)')}
-          onMouseLeave={e => (e.currentTarget.style.background = 'rgba(229,9,20,.1)')}
-        >
-          🚪 Logout
-        </button>
       </div>
     </aside>
   )
