@@ -4,26 +4,30 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 const REFRESH_INTERVAL = 30000 // 30 seconds
 
 function CountryFlag({ country }: { country: string }) {
-  // ISO 3166-1 alpha-2 to regional indicator emoji
   const code = (country || 'US').toUpperCase().slice(0, 2)
-  const flagEmoji = code.split('').map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('')
-  return <span style={{ fontSize: 20, lineHeight: 1 }}>{flagEmoji}</span>
+  try {
+    const flag = code.split('').map(c => String.fromCodePoint(c.charCodeAt(0) + 127397)).join('')
+    return <span style={{ fontSize: 18, lineHeight: 1 }}>{flag}</span>
+  } catch {
+    return <span style={{ fontSize: 11, color: 'var(--text3)' }}>{code}</span>
+  }
 }
 
 export default function NumbersPage() {
-  const [numbers,      setNumbers]      = useState<any[]>([])
-  const [filtered,     setFiltered]     = useState<any[]>([])
-  const [search,       setSearch]       = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [syncing,      setSyncing]      = useState(false)
-  const [syncMsg,      setSyncMsg]      = useState<{ ok: boolean; text: string } | null>(null)
-  const [loading,      setLoading]      = useState(true)
-  const [expandedId,   setExpandedId]   = useState<string | null>(null)
-  const [smsMap,       setSmsMap]       = useState<Record<string, any[]>>({})
-  const [smsLoading,   setSmsLoading]   = useState<Record<string, boolean>>({})
-  const [countdown,    setCountdown]    = useState(REFRESH_INTERVAL / 1000)
-  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null)
-  const fetchRef     = useRef<ReturnType<typeof setInterval> | null>(null)
+  const [numbers,       setNumbers]       = useState<any[]>([])
+  const [filtered,      setFiltered]      = useState<any[]>([])
+  const [search,        setSearch]        = useState('')
+  const [statusFilter,  setStatusFilter]  = useState('')
+  const [syncing,       setSyncing]       = useState(false)
+  const [syncMsg,       setSyncMsg]       = useState<{ ok: boolean; text: string } | null>(null)
+  const [loading,       setLoading]       = useState(true)
+  const [expandedId,    setExpandedId]    = useState<string | null>(null)
+  const [smsMap,        setSmsMap]        = useState<Record<string, any[]>>({})
+  const [smsLoading,    setSmsLoading]    = useState<Record<string, boolean>>({})
+  const [countdown,     setCountdown]     = useState(REFRESH_INTERVAL / 1000)
+  const countdownRef  = useRef<ReturnType<typeof setInterval> | null>(null)
+  const fetchRef      = useRef<ReturnType<typeof setInterval> | null>(null)
+  const liveSmsRef    = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const fetchNumbers = useCallback(async () => {
     try {
@@ -34,20 +38,17 @@ export default function NumbersPage() {
       }
     } catch {}
     setLoading(false)
-    setCountdown(REFRESH_INTERVAL / 1000) // reset countdown
+    setCountdown(REFRESH_INTERVAL / 1000)
   }, [])
 
-  // Initial load + interval
+  // Initial load + 30s auto-refresh
   useEffect(() => {
     fetchNumbers()
-
     fetchRef.current = setInterval(fetchNumbers, REFRESH_INTERVAL)
-    return () => {
-      if (fetchRef.current) clearInterval(fetchRef.current)
-    }
+    return () => { if (fetchRef.current) clearInterval(fetchRef.current) }
   }, [fetchNumbers])
 
-  // Countdown timer (visual)
+  // Visual countdown timer
   useEffect(() => {
     countdownRef.current = setInterval(() => {
       setCountdown(prev => (prev <= 1 ? REFRESH_INTERVAL / 1000 : prev - 1))
@@ -58,7 +59,7 @@ export default function NumbersPage() {
   // Filter logic
   useEffect(() => {
     let f = numbers
-    if (search) f = f.filter(n =>
+    if (search)       f = f.filter(n =>
       (n.phone || '').includes(search) ||
       (n.country || '').toLowerCase().includes(search.toLowerCase()) ||
       (n.country_name || '').toLowerCase().includes(search.toLowerCase())
@@ -73,10 +74,10 @@ export default function NumbersPage() {
       const r = await fetch('/api/ivasms/sync', { method: 'POST' })
       const d = await r.json()
       if (d.success) {
-        setSyncMsg({ ok: true, text: `Synced ${d.count} numbers · ${d.added ?? 0} found · ${d.smsAdded ?? 0} new SMS` })
+        setSyncMsg({ ok: true, text: `Synced ${d.count} numbers · ${d.smsAdded ?? 0} new SMS` })
         fetchNumbers()
       } else {
-        setSyncMsg({ ok: false, text: d.error || 'Sync failed. Check iVASMS credentials in Settings.' })
+        setSyncMsg({ ok: false, text: d.error || 'Sync failed — check iVASMS credentials in Settings.' })
       }
     } catch {
       setSyncMsg({ ok: false, text: 'Network error — please try again.' })
@@ -87,12 +88,16 @@ export default function NumbersPage() {
   }
 
   const toggleExpand = async (num: any) => {
-    if (expandedId === num.id) { setExpandedId(null); return }
+    if (expandedId === num.id) {
+      setExpandedId(null)
+      if (liveSmsRef.current) { clearInterval(liveSmsRef.current); liveSmsRef.current = null }
+      return
+    }
     setExpandedId(num.id)
     if (!smsMap[num.id]) {
       setSmsLoading(p => ({ ...p, [num.id]: true }))
       try {
-        const r = await fetch(`/api/ivasms/sms?numberId=${num.id}&limit=10`)
+        const r = await fetch(`/api/ivasms/sms?numberId=${num.id}&limit=15`)
         if (r.ok) {
           const { messages } = await r.json()
           setSmsMap(p => ({ ...p, [num.id]: messages || [] }))
@@ -102,19 +107,20 @@ export default function NumbersPage() {
     }
   }
 
-  // Live SMS refresh for expanded row
+  // Live SMS polling for expanded row every 5s
   useEffect(() => {
+    if (liveSmsRef.current) { clearInterval(liveSmsRef.current); liveSmsRef.current = null }
     if (!expandedId) return
-    const t = setInterval(async () => {
+    liveSmsRef.current = setInterval(async () => {
       try {
-        const r = await fetch(`/api/ivasms/sms?numberId=${expandedId}&limit=10`)
+        const r = await fetch(`/api/ivasms/sms?numberId=${expandedId}&limit=15`)
         if (r.ok) {
           const { messages } = await r.json()
           setSmsMap(p => ({ ...p, [expandedId]: messages || [] }))
         }
       } catch {}
     }, 5000)
-    return () => clearInterval(t)
+    return () => { if (liveSmsRef.current) clearInterval(liveSmsRef.current) }
   }, [expandedId])
 
   const activeCount   = numbers.filter(n => n.status === 'active').length
@@ -125,8 +131,7 @@ export default function NumbersPage() {
     if (!t) return '—'
     try {
       const d    = new Date(t)
-      const now  = new Date()
-      const diff = (now.getTime() - d.getTime()) / 1000
+      const diff = (Date.now() - d.getTime()) / 1000
       if (diff < 60)    return `${Math.floor(diff)}s ago`
       if (diff < 3600)  return `${Math.floor(diff / 60)}m ago`
       if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
@@ -136,20 +141,20 @@ export default function NumbersPage() {
 
   const StatusBadge = ({ status }: { status: string }) => {
     if (status === 'active') return (
-      <span className="badge badge-green" style={{ gap: 5 }}>
-        <span className="dot dot-green" style={{ width: 6, height: 6, boxShadow: 'none' }} />
+      <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span className="dot dot-green dot-pulse" style={{ width: 6, height: 6, boxShadow: 'none' }} />
         Active
       </span>
     )
     if (status === 'expired') return (
-      <span className="badge badge-orange" style={{ gap: 5 }}>
+      <span className="badge badge-orange" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
         <i className="bi bi-exclamation-triangle-fill" style={{ fontSize: 9 }} />
         Expired
       </span>
     )
     return (
-      <span className="badge badge-gray" style={{ gap: 5 }}>
-        <i className="bi bi-dash-circle" style={{ fontSize: 9 }} />
+      <span className="badge badge-gray" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+        <span className="dot dot-gray" style={{ width: 6, height: 6 }} />
         Inactive
       </span>
     )
@@ -161,10 +166,13 @@ export default function NumbersPage() {
       {/* ── Header ── */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)' }}>Phone Numbers</h2>
-          <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 2 }}>
-            Manage your iVASMS numbers ·&nbsp;
-            <span className="live-badge" style={{ fontSize: 10, verticalAlign: 'middle' }}>
+          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)' }}>
+            <i className="bi bi-phone-fill" style={{ color: 'var(--accent)', marginRight: 10, fontSize: 20 }} />
+            Phone Numbers
+          </h2>
+          <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
+            iVASMS numbers ·&nbsp;
+            <span className="live-badge" style={{ fontSize: 10 }}>
               <span className="live-dot" />
               Auto-refresh in {countdown}s
             </span>
@@ -172,17 +180,12 @@ export default function NumbersPage() {
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
           {syncMsg && (
-            <div className={`alert ${syncMsg.ok ? 'alert-success' : 'alert-error'}`} style={{ padding: '7px 12px', fontSize: 12 }}>
+            <div className={`alert ${syncMsg.ok ? 'alert-success' : 'alert-error'}`} style={{ padding: '7px 12px', fontSize: 12, margin: 0 }}>
               <i className={`bi ${syncMsg.ok ? 'bi-check2' : 'bi-exclamation-triangle-fill'}`} />
               {syncMsg.text}
             </div>
           )}
-          <button
-            onClick={fetchNumbers}
-            className="btn-secondary btn-sm"
-            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
-            title="Refresh now"
-          >
+          <button onClick={fetchNumbers} className="btn-secondary btn-sm" style={{ gap: 6 }} title="Refresh now">
             <i className="bi bi-arrow-repeat" style={{ fontSize: 14 }} />
             Refresh
           </button>
@@ -190,12 +193,9 @@ export default function NumbersPage() {
             onClick={handleSync}
             disabled={syncing}
             className="btn-primary"
-            style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '9px 18px', fontSize: 13 }}
+            style={{ padding: '9px 18px', fontSize: 13, gap: 7 }}
           >
-            <i
-              className="bi bi-arrow-repeat"
-              style={{ animation: syncing ? 'spin 1s linear infinite' : 'none', display: 'inline-block', fontSize: 15 }}
-            />
+            <i className="bi bi-arrow-repeat" style={{ animation: syncing ? 'spin 1s linear infinite' : 'none', display: 'inline-block', fontSize: 15 }} />
             {syncing ? 'Syncing iVASMS…' : 'Sync iVASMS'}
           </button>
         </div>
@@ -204,10 +204,10 @@ export default function NumbersPage() {
       {/* ── Stats bar ── */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12 }}>
         {[
-          { icon: 'bi-phone-fill',    label: 'Total',     value: numbers.length, color: 'var(--accent)' },
-          { icon: 'bi-circle-fill',   label: 'Active',    value: activeCount,    color: 'var(--green)'  },
-          { icon: 'bi-dash-circle',   label: 'Inactive',  value: inactiveCount,  color: 'var(--text3)'  },
-          { icon: 'bi-globe',         label: 'Countries', value: countries.length, color: 'var(--blue)' },
+          { icon: 'bi-phone-fill',  label: 'Total',     value: numbers.length,   color: 'var(--accent)' },
+          { icon: 'bi-circle-fill', label: 'Active',    value: activeCount,      color: 'var(--green)'  },
+          { icon: 'bi-dash-circle', label: 'Inactive',  value: inactiveCount,    color: 'var(--text3)'  },
+          { icon: 'bi-globe',       label: 'Countries', value: countries.length, color: 'var(--blue)'   },
         ].map(s => (
           <div key={s.label} className="card card-sm" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
             <div style={{
@@ -218,31 +218,34 @@ export default function NumbersPage() {
               <i className={`bi ${s.icon}`} style={{ color: s.color, fontSize: 16 }} />
             </div>
             <div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: s.color }}>{s.value}</div>
-              <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5 }}>{s.label}</div>
+              <div style={{ fontSize: 22, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
+              <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, marginTop: 2 }}>{s.label}</div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* ── Active / Inactive visual breakdown ── */}
+      {/* ── Active/Inactive distribution bar ── */}
       {numbers.length > 0 && (
         <div className="card card-sm" style={{ padding: '12px 16px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-            <i className="bi bi-bar-chart-fill" style={{ color: 'var(--accent)', fontSize: 14 }} />
+            <i className="bi bi-bar-chart-fill" style={{ color: 'var(--accent)', fontSize: 13 }} />
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>Number Status Distribution</span>
+            <span className="live-badge" style={{ fontSize: 9, marginLeft: 'auto' }}>
+              <span className="live-dot" />30s refresh
+            </span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div style={{ flex: activeCount || 1, height: 8, borderRadius: '4px 0 0 4px', background: 'var(--green)', minWidth: 4 }} />
-            <div style={{ flex: inactiveCount || 1, height: 8, borderRadius: '0 4px 4px 0', background: 'var(--text3)', minWidth: 4 }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 3, height: 10, borderRadius: 5, overflow: 'hidden', background: 'var(--border)' }}>
+            <div style={{ flex: activeCount || 0.01, height: '100%', background: 'var(--green)', transition: 'flex .5s ease' }} />
+            <div style={{ flex: inactiveCount || 0.01, height: '100%', background: 'var(--text3)', transition: 'flex .5s ease' }} />
           </div>
           <div style={{ display: 'flex', gap: 20, marginTop: 6 }}>
-            <span style={{ fontSize: 11, color: 'var(--green)' }}>
-              <i className="bi bi-circle-fill" style={{ fontSize: 7, marginRight: 4 }} />
+            <span style={{ fontSize: 11, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="bi bi-circle-fill" style={{ fontSize: 7 }} />
               Active: {activeCount} ({numbers.length > 0 ? Math.round(activeCount / numbers.length * 100) : 0}%)
             </span>
-            <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-              <i className="bi bi-dash-circle" style={{ fontSize: 9, marginRight: 4 }} />
+            <span style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <i className="bi bi-dash-circle" style={{ fontSize: 9 }} />
               Inactive: {inactiveCount} ({numbers.length > 0 ? Math.round(inactiveCount / numbers.length * 100) : 0}%)
             </span>
           </div>
@@ -255,7 +258,7 @@ export default function NumbersPage() {
           <i className="bi bi-search input-icon" />
           <input
             type="text"
-            placeholder="Search by number, country…"
+            placeholder="Search by number or country…"
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -268,14 +271,9 @@ export default function NumbersPage() {
           <option value="">All Status</option>
           <option value="active">Active Only</option>
           <option value="inactive">Inactive Only</option>
-          <option value="expired">Expired Only</option>
         </select>
         {(search || statusFilter) && (
-          <button
-            className="btn-ghost btn-sm"
-            onClick={() => { setSearch(''); setStatusFilter('') }}
-            style={{ display: 'flex', alignItems: 'center', gap: 5 }}
-          >
+          <button className="btn-ghost btn-sm" onClick={() => { setSearch(''); setStatusFilter('') }} style={{ gap: 5 }}>
             <i className="bi bi-x" style={{ fontSize: 15 }} />Clear
           </button>
         )}
@@ -300,11 +298,11 @@ export default function NumbersPage() {
             </p>
             <p style={{ fontSize: 13, marginBottom: 20 }}>
               {numbers.length === 0
-                ? 'Add iVASMS credentials in Settings, then click Sync.'
+                ? 'Add iVASMS credentials in Settings → iVASMS Credentials, then click Sync.'
                 : 'Try removing filters to see all numbers.'}
             </p>
             {numbers.length === 0 && (
-              <button onClick={handleSync} className="btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+              <button onClick={handleSync} className="btn-primary" style={{ display: 'inline-flex', gap: 7 }}>
                 <i className="bi bi-arrow-repeat" style={{ fontSize: 15 }} />Sync Now
               </button>
             )}
@@ -336,7 +334,7 @@ export default function NumbersPage() {
                         <div>
                           <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{n.phone}</div>
                           {n.ivasms_id && (
-                            <div style={{ fontSize: 10, color: 'var(--text3)' }}>ID: {n.ivasms_id}</div>
+                            <div style={{ fontSize: 10, color: 'var(--text3)' }}>ID #{n.ivasms_id}</div>
                           )}
                         </div>
                       </div>
@@ -345,12 +343,11 @@ export default function NumbersPage() {
                       <div style={{ fontSize: 12, color: 'var(--text2)' }}>{n.country_name || n.country || '—'}</div>
                       <div style={{ fontSize: 10, color: 'var(--text3)' }}>{n.country}</div>
                     </td>
-                    <td><StatusBadge status={n.status} /></td>
                     <td>
-                      <span style={{
-                        fontWeight: 700, fontSize: 14,
-                        color: (n.sms_count || 0) > 0 ? 'var(--text)' : 'var(--text3)',
-                      }}>
+                      <StatusBadge status={n.status} />
+                    </td>
+                    <td>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: (n.sms_count || 0) > 0 ? 'var(--text)' : 'var(--text3)' }}>
                         {n.sms_count || 0}
                       </span>
                     </td>
@@ -374,12 +371,14 @@ export default function NumbersPage() {
                     </td>
                   </tr>
 
-                  {/* Expanded SMS row */}
+                  {/* ── Expanded Live SMS row ── */}
                   {expandedId === n.id && (
                     <tr key={`exp-${n.id}`}>
                       <td colSpan={7} style={{ padding: 0, background: 'var(--bg)' }}>
                         <div style={{ padding: '14px 20px 18px', borderTop: '1px solid var(--border)' }}>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+
+                          {/* Panel header */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
                             <i className="bi bi-chat-dots-fill" style={{ color: 'var(--accent)', fontSize: 14 }} />
                             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text2)', textTransform: 'uppercase', letterSpacing: .5 }}>
                               Live SMS for {n.phone}
@@ -388,6 +387,9 @@ export default function NumbersPage() {
                               <span className="live-dot" />5s refresh
                             </span>
                             <StatusBadge status={n.status} />
+                            <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>
+                              {(smsMap[n.id] || []).length} message{(smsMap[n.id] || []).length !== 1 ? 's' : ''}
+                            </span>
                           </div>
 
                           {smsLoading[n.id] ? (
@@ -397,10 +399,10 @@ export default function NumbersPage() {
                           ) : !smsMap[n.id] || smsMap[n.id].length === 0 ? (
                             <div style={{ color: 'var(--text3)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
                               <i className="bi bi-chat-dots-fill" style={{ opacity: .3 }} />
-                              No SMS messages yet for this number. Sync iVASMS to load messages.
+                              No SMS yet for this number. Sync iVASMS to load messages.
                             </div>
                           ) : (
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto' }}>
                               {smsMap[n.id].map((msg: any) => (
                                 <div key={msg.id} className="sms-item" style={{ padding: '10px 14px' }}>
                                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>

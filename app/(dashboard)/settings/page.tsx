@@ -12,35 +12,37 @@ function MsgBox({ msg }: { msg: { type: 'success' | 'error'; text: string } | nu
 }
 
 export default function SettingsPage() {
-  const [user, setUser] = useState<any>(null)
-  const [profile, setProfile] = useState({ name: '', email: '' })
-  const [passwords, setPasswords] = useState({ old: '', new: '', confirm: '' })
-  const [ivasms, setIvasms] = useState({ email: '', password: '' })
-  const [telegram, setTelegram] = useState({ botToken: '', chatId: '' })
-  const [token, setToken] = useState('')
-  const [msgs, setMsgs] = useState<Record<string, { type: 'success' | 'error'; text: string } | null>>({})
-  const [loading, setLoading] = useState<Record<string, boolean>>({})
-  const [showPwd, setShowPwd] = useState(false)
-  const [showIvasPwd, setShowIvasPwd] = useState(false)
-  const [copied, setCopied] = useState(false)
-  const [testingIvas, setTestingIvas] = useState(false)
-  const [testingTg, setTestingTg] = useState(false)
+  const [user,         setUser]         = useState<any>(null)
+  const [profile,      setProfile]      = useState({ name: '', email: '' })
+  const [passwords,    setPasswords]    = useState({ old: '', new: '', confirm: '' })
+  const [ivasms,       setIvasms]       = useState({ email: '', password: '' })
+  const [telegram,     setTelegram]     = useState({ botToken: '', chatId: '' })
+  const [token,        setToken]        = useState('')
+  const [msgs,         setMsgs]         = useState<Record<string, { type: 'success' | 'error'; text: string } | null>>({})
+  const [loading,      setLoading]      = useState<Record<string, boolean>>({})
+  const [showPwd,      setShowPwd]      = useState(false)
+  const [showIvasPwd,  setShowIvasPwd]  = useState(false)
+  const [copied,       setCopied]       = useState(false)
+  const [testingIvas,  setTestingIvas]  = useState(false)
+  const [testingTg,    setTestingTg]    = useState(false)
 
   useEffect(() => {
-    fetch('/api/settings').then(r => r.json()).then(d => {
-      if (d.user) {
-        setUser(d.user)
-        setProfile({ name: d.user.name || '', email: d.user.email || '' })
-        setIvasms({ email: d.user.ivasms_email || '', password: '' })
-        setTelegram({ botToken: d.user.telegram_bot_token || '', chatId: d.user.telegram_chat_id || '' })
-        setToken(d.user.mobile_token || '')
-      }
-    }).catch(() => {})
+    fetch('/api/settings')
+      .then(r => r.json())
+      .then(d => {
+        if (d.user) {
+          setUser(d.user)
+          setProfile({ name: d.user.name || '', email: d.user.email || '' })
+          setIvasms({ email: d.user.ivasms_email || '', password: '' })
+          setTelegram({ botToken: d.user.telegram_bot_token || '', chatId: d.user.telegram_chat_id || '' })
+          setToken(d.user.mobile_token || '')
+        }
+      }).catch(() => {})
   }, [])
 
-  const setMsg = (key: string, type: 'success' | 'error', text: string) => {
+  const setMsg  = (key: string, type: 'success' | 'error', text: string) => {
     setMsgs(p => ({ ...p, [key]: { type, text } }))
-    setTimeout(() => setMsgs(p => ({ ...p, [key]: null })), 5000)
+    setTimeout(() => setMsgs(p => ({ ...p, [key]: null })), 6000)
   }
   const setLoad = (key: string, v: boolean) => setLoading(p => ({ ...p, [key]: v }))
 
@@ -48,11 +50,14 @@ export default function SettingsPage() {
     e.preventDefault(); setLoad('profile', true)
     try {
       const r = await fetch('/api/settings', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'profile', name: profile.name, email: profile.email }),
       })
       const d = await r.json()
-      r.ok ? setMsg('profile', 'success', 'Profile updated successfully') : setMsg('profile', 'error', d.error || 'Failed')
+      r.ok
+        ? setMsg('profile', 'success', 'Profile updated successfully')
+        : setMsg('profile', 'error', d.error || 'Failed to update profile')
     } catch { setMsg('profile', 'error', 'Network error') }
     setLoad('profile', false)
   }
@@ -64,46 +69,72 @@ export default function SettingsPage() {
     setLoad('password', true)
     try {
       const r = await fetch('/api/settings', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'password', old: passwords.old, new: passwords.new }),
       })
       const d = await r.json()
-      if (r.ok) { setMsg('password', 'success', 'Password changed successfully'); setPasswords({ old: '', new: '', confirm: '' }) }
-      else setMsg('password', 'error', d.error || 'Failed')
+      if (r.ok) {
+        setMsg('password', 'success', 'Password changed successfully')
+        setPasswords({ old: '', new: '', confirm: '' })
+      } else {
+        setMsg('password', 'error', d.error || 'Failed to change password')
+      }
     } catch { setMsg('password', 'error', 'Network error') }
     setLoad('password', false)
   }
 
   const saveIvasms = async (e: React.FormEvent) => {
-    e.preventDefault(); setLoad('ivasms', true)
+    e.preventDefault()
+    if (!ivasms.email.trim()) { setMsg('ivasms', 'error', 'Email is required'); return }
+    if (!ivasms.password.trim()) { setMsg('ivasms', 'error', 'Password is required'); return }
+    setLoad('ivasms', true)
     try {
       const r = await fetch('/api/settings', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'ivasms', email: ivasms.email, password: ivasms.password }),
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'ivasms', email: ivasms.email.trim(), password: ivasms.password.trim() }),
       })
       const d = await r.json()
-      if (r.ok) { setMsg('ivasms', 'success', 'iVASMS credentials saved. Click "Sync iVASMS" in the topbar.') }
-      else setMsg('ivasms', 'error', d.error || 'Failed to save')
+      if (r.ok) {
+        setMsg('ivasms', 'success', 'iVASMS credentials saved! Click "Save & Test Connection" to verify.')
+        if (d.user) setUser(d.user)
+      } else {
+        setMsg('ivasms', 'error', d.error || 'Failed to save credentials')
+      }
     } catch { setMsg('ivasms', 'error', 'Network error') }
     setLoad('ivasms', false)
   }
 
   const testIvasms = async () => {
-    if (!ivasms.email || !ivasms.password) { setMsg('ivasms', 'error', 'Enter credentials first'); return }
+    if (!ivasms.email.trim() || !ivasms.password.trim()) {
+      setMsg('ivasms', 'error', 'Enter both email and password first')
+      return
+    }
     setTestingIvas(true)
-    // Save first then sync
     try {
+      // Step 1: Save credentials
       const saveR = await fetch('/api/settings', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'ivasms', email: ivasms.email, password: ivasms.password }),
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'ivasms', email: ivasms.email.trim(), password: ivasms.password.trim() }),
       })
-      if (!saveR.ok) { setMsg('ivasms', 'error', 'Failed to save credentials'); setTestingIvas(false); return }
+      if (!saveR.ok) {
+        const sd = await saveR.json()
+        setMsg('ivasms', 'error', 'Failed to save: ' + (sd.error || 'Unknown error'))
+        setTestingIvas(false)
+        return
+      }
+      const sd = await saveR.json()
+      if (sd.user) setUser(sd.user)
+
+      // Step 2: Test sync
       const syncR = await fetch('/api/ivasms/sync', { method: 'POST' })
       const syncD = await syncR.json()
       if (syncD.success) {
         setMsg('ivasms', 'success', `Connected! Found ${syncD.count} numbers, ${syncD.smsAdded ?? 0} SMS loaded.`)
       } else {
-        setMsg('ivasms', 'error', syncD.error || 'Connection failed. Check credentials.')
+        setMsg('ivasms', 'error', syncD.error || 'Connection test failed — check your credentials.')
       }
     } catch { setMsg('ivasms', 'error', 'Network error during test') }
     setTestingIvas(false)
@@ -113,12 +144,16 @@ export default function SettingsPage() {
     e.preventDefault(); setLoad('telegram', true)
     try {
       const r = await fetch('/api/telegram/setup', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ botToken: telegram.botToken, chatId: telegram.chatId }),
       })
       const d = await r.json()
-      if (r.ok) { setMsg('telegram', 'success', `Bot @${d.bot?.username || ''} connected successfully`) }
-      else setMsg('telegram', 'error', d.error || 'Invalid bot token')
+      if (r.ok) {
+        setMsg('telegram', 'success', `Bot @${d.bot?.username || 'connected'} successfully`)
+      } else {
+        setMsg('telegram', 'error', d.error || 'Invalid bot token')
+      }
     } catch { setMsg('telegram', 'error', 'Network error') }
     setLoad('telegram', false)
   }
@@ -128,7 +163,9 @@ export default function SettingsPage() {
     try {
       const r = await fetch('/api/telegram/test', { method: 'POST' })
       const d = await r.json()
-      r.ok ? setMsg('telegram', 'success', 'Test message sent to Telegram!') : setMsg('telegram', 'error', d.error || 'Send failed')
+      r.ok
+        ? setMsg('telegram', 'success', 'Test message sent to Telegram!')
+        : setMsg('telegram', 'error', d.error || 'Send failed')
     } catch { setMsg('telegram', 'error', 'Network error') }
     setTestingTg(false)
   }
@@ -143,7 +180,8 @@ export default function SettingsPage() {
     if (!confirm('Regenerate mobile token? Existing DLChat connections will be invalidated.')) return
     try {
       const r = await fetch('/api/settings', {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ type: 'regenerate_token' }),
       })
       const d = await r.json()
@@ -169,11 +207,13 @@ export default function SettingsPage() {
   return (
     <div style={{ maxWidth: 720 }}>
       <div style={{ marginBottom: 24 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)' }}>Settings</h2>
-        <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 2 }}>Configure your account, iVASMS, Telegram and mobile app</p>
+        <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <i className="bi bi-gear-fill" style={{ color: 'var(--accent)', fontSize: 20 }} />Settings
+        </h2>
+        <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 4 }}>Configure account, iVASMS credentials, Telegram and mobile app</p>
       </div>
 
-      {/* Profile */}
+      {/* ── Profile ── */}
       <Section icon="bi-person-fill" title="Profile">
         <form onSubmit={saveProfile}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
@@ -192,7 +232,7 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-          <button type="submit" className="btn-primary btn-sm" disabled={loading.profile} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="submit" className="btn-primary btn-sm" disabled={loading.profile}>
             <i className="bi bi-save-fill" style={{ fontSize: 13 }} />
             {loading.profile ? 'Saving…' : 'Save Profile'}
           </button>
@@ -200,16 +240,25 @@ export default function SettingsPage() {
         </form>
       </Section>
 
-      {/* Password */}
+      {/* ── Password ── */}
       <Section icon="bi-lock-fill" title="Change Password">
         <form onSubmit={savePassword}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 14 }}>
             <div className="form-group">
               <label className="form-label">Current Password</label>
-              <div className="input-group">
+              <div className="input-group" style={{ position: 'relative' }}>
                 <i className="bi bi-lock-fill input-icon" />
-                <input type={showPwd ? 'text' : 'password'} value={passwords.old} onChange={e => setPasswords(p => ({ ...p, old: e.target.value }))} placeholder="Current password" />
-                <button type="button" onClick={() => setShowPwd(p => !p)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', padding: 4, cursor: 'pointer' }}>
+                <input
+                  type={showPwd ? 'text' : 'password'}
+                  value={passwords.old}
+                  onChange={e => setPasswords(p => ({ ...p, old: e.target.value }))}
+                  placeholder="Current password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPwd(p => !p)}
+                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', padding: 4, cursor: 'pointer', width: 'auto' }}
+                >
                   <i className={`bi ${showPwd ? 'bi-eye-slash-fill' : 'bi-eye-fill'}`} style={{ fontSize: 15 }} />
                 </button>
               </div>
@@ -225,7 +274,7 @@ export default function SettingsPage() {
               </div>
             </div>
           </div>
-          <button type="submit" className="btn-primary btn-sm" disabled={loading.password} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button type="submit" className="btn-primary btn-sm" disabled={loading.password}>
             <i className="bi bi-lock-fill" style={{ fontSize: 13 }} />
             {loading.password ? 'Changing…' : 'Change Password'}
           </button>
@@ -233,13 +282,14 @@ export default function SettingsPage() {
         </form>
       </Section>
 
-      {/* iVASMS */}
+      {/* ── iVASMS ── */}
       <Section icon="bi-phone-fill" title="iVASMS Credentials">
         <div className="alert alert-info" style={{ marginBottom: 16 }}>
           <i className="bi bi-info-circle-fill" />
           <div>
-            <strong>How to add:</strong> Enter your iVASMS.com account email and password below, then click
-            <strong> Save &amp; Test</strong> to verify the connection and load your numbers automatically.
+            <strong>How to connect:</strong> Enter your <strong>iVASMS.com</strong> account email and password,
+            then click <strong>Save &amp; Test Connection</strong>. This will save your credentials and
+            automatically sync your numbers and SMS messages.
           </div>
         </div>
         <form onSubmit={saveIvasms}>
@@ -268,24 +318,26 @@ export default function SettingsPage() {
                   placeholder="Your iVASMS password"
                   autoComplete="new-password"
                 />
-                <button type="button" onClick={() => setShowIvasPwd(p => !p)}
-                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', padding: 4, cursor: 'pointer' }}>
+                <button
+                  type="button"
+                  onClick={() => setShowIvasPwd(p => !p)}
+                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', padding: 4, cursor: 'pointer', width: 'auto' }}
+                >
                   <i className={`bi ${showIvasPwd ? 'bi-eye-slash-fill' : 'bi-eye-fill'}`} style={{ fontSize: 15 }} />
                 </button>
               </div>
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="submit" className="btn-primary btn-sm" disabled={loading.ivasms} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button type="submit" className="btn-primary btn-sm" disabled={loading.ivasms}>
               <i className="bi bi-save-fill" style={{ fontSize: 13 }} />
               {loading.ivasms ? 'Saving…' : 'Save Credentials'}
             </button>
             <button
               type="button"
               onClick={testIvasms}
-              disabled={testingIvas || !ivasms.email || !ivasms.password}
+              disabled={testingIvas || !ivasms.email.trim() || !ivasms.password.trim()}
               className="btn-success btn-sm"
-              style={{ display: 'flex', alignItems: 'center', gap: 6 }}
             >
               <i className="bi bi-arrow-repeat" style={{ animation: testingIvas ? 'spin 1s linear infinite' : 'none', display: 'inline-block', fontSize: 13 }} />
               {testingIvas ? 'Testing & Syncing…' : 'Save & Test Connection'}
@@ -293,13 +345,22 @@ export default function SettingsPage() {
           </div>
           <MsgBox msg={msgs.ivasms} />
         </form>
+
+        {/* Show saved email status */}
+        {user?.ivasms_email && (
+          <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--green-dim)', border: '1px solid rgba(0,230,118,.25)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+            <span className="dot dot-green dot-pulse" />
+            <span style={{ color: 'var(--green)', fontWeight: 600 }}>Saved:</span>
+            <span style={{ color: 'var(--text2)', fontFamily: 'monospace' }}>{user.ivasms_email}</span>
+          </div>
+        )}
       </Section>
 
-      {/* Telegram */}
+      {/* ── Telegram ── */}
       <Section icon="bi-telegram" title="Telegram Bot">
         <div className="alert alert-info" style={{ marginBottom: 16 }}>
           <i className="bi bi-info-circle-fill" />
-          <div>Create a bot via <strong>@BotFather</strong> on Telegram, get the token, then send a message to your bot and get your Chat ID from <strong>@userinfobot</strong>.</div>
+          <div>Create a bot via <strong>@BotFather</strong> on Telegram, then get your Chat ID from <strong>@userinfobot</strong>.</div>
         </div>
         <form onSubmit={saveTelegram}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
@@ -328,11 +389,11 @@ export default function SettingsPage() {
             </div>
           </div>
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button type="submit" className="btn-primary btn-sm" disabled={loading.telegram} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button type="submit" className="btn-primary btn-sm" disabled={loading.telegram}>
               <i className="bi bi-save-fill" style={{ fontSize: 13 }} />
               {loading.telegram ? 'Saving…' : 'Save Telegram'}
             </button>
-            <button type="button" onClick={testTelegram} disabled={testingTg || !telegram.botToken} className="btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button type="button" onClick={testTelegram} disabled={testingTg || !telegram.botToken} className="btn-secondary btn-sm">
               <i className="bi bi-send-fill" style={{ fontSize: 12 }} />
               {testingTg ? 'Sending…' : 'Send Test Message'}
             </button>
@@ -341,10 +402,10 @@ export default function SettingsPage() {
         </form>
       </Section>
 
-      {/* Mobile Token */}
+      {/* ── Mobile Token ── */}
       <Section icon="bi-android2" title="DLChat Mobile App Token">
         <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 16, lineHeight: 1.6 }}>
-          Use this token in the DLChat mobile app or PWA to connect to your account. Keep it secret.
+          Use this token in the DLChat mobile app or PWA to connect to your account. Keep it secret — anyone with this token can access your SMS data.
         </p>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
           <div style={{
@@ -352,12 +413,15 @@ export default function SettingsPage() {
             borderRadius: 8, padding: '10px 14px',
             fontFamily: 'monospace', fontSize: 13, color: 'var(--text)',
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>{token || 'No token generated'}</div>
-          <button onClick={copyToken} className="btn-secondary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+            minWidth: 0,
+          }}>
+            {token || 'No token generated'}
+          </div>
+          <button onClick={copyToken} className="btn-secondary btn-sm" style={{ flexShrink: 0 }}>
             <i className={`bi ${copied ? 'bi-clipboard-check-fill' : 'bi-clipboard-fill'}`} style={{ fontSize: 13 }} />
             {copied ? 'Copied!' : 'Copy'}
           </button>
-          <button onClick={regenerateToken} className="btn-danger btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+          <button onClick={regenerateToken} className="btn-danger btn-sm" style={{ flexShrink: 0 }}>
             <i className="bi bi-arrow-repeat" style={{ fontSize: 13 }} />
             Regenerate
           </button>
