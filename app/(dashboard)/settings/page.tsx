@@ -12,19 +12,22 @@ function MsgBox({ msg }: { msg: { type: 'success' | 'error'; text: string } | nu
 }
 
 export default function SettingsPage() {
-  const [user,         setUser]         = useState<any>(null)
-  const [profile,      setProfile]      = useState({ name: '', email: '' })
-  const [passwords,    setPasswords]    = useState({ old: '', new: '', confirm: '' })
-  const [ivasms,       setIvasms]       = useState({ email: '', password: '' })
-  const [telegram,     setTelegram]     = useState({ botToken: '', chatId: '' })
-  const [token,        setToken]        = useState('')
-  const [msgs,         setMsgs]         = useState<Record<string, { type: 'success' | 'error'; text: string } | null>>({})
-  const [loading,      setLoading]      = useState<Record<string, boolean>>({})
-  const [showPwd,      setShowPwd]      = useState(false)
-  const [showIvasPwd,  setShowIvasPwd]  = useState(false)
-  const [copied,       setCopied]       = useState(false)
-  const [testingIvas,  setTestingIvas]  = useState(false)
-  const [testingTg,    setTestingTg]    = useState(false)
+  const [user,        setUser]        = useState<any>(null)
+  const [profile,     setProfile]     = useState({ name: '', email: '' })
+  const [passwords,   setPasswords]   = useState({ old: '', new: '', confirm: '' })
+  const [ivasms,      setIvasms]      = useState({ email: '', password: '' })
+  const [telegram,    setTelegram]    = useState({ botToken: '', chatId: '' })
+  const [prefs,       setPrefs]       = useState({ auto_sync: false, auto_sync_interval: 300, notify_otp: true, notify_sms: false })
+  const [token,       setToken]       = useState('')
+  const [apiKey,      setApiKey]      = useState('')
+  const [msgs,        setMsgs]        = useState<Record<string, { type: 'success' | 'error'; text: string } | null>>({})
+  const [loading,     setLoading]     = useState<Record<string, boolean>>({})
+  const [showPwd,     setShowPwd]     = useState(false)
+  const [showIvasPwd, setShowIvasPwd] = useState(false)
+  const [copied,      setCopied]      = useState<string | null>(null)
+  const [testingIvas, setTestingIvas] = useState(false)
+  const [testingTg,   setTestingTg]   = useState(false)
+  const [tab,         setTab]         = useState<'account'|'integrations'|'preferences'|'token'>('account')
 
   useEffect(() => {
     fetch('/api/settings')
@@ -36,6 +39,13 @@ export default function SettingsPage() {
           setIvasms({ email: d.user.ivasms_email || '', password: '' })
           setTelegram({ botToken: d.user.telegram_bot_token || '', chatId: d.user.telegram_chat_id || '' })
           setToken(d.user.mobile_token || '')
+          setApiKey(d.user.api_key || '')
+          setPrefs({
+            auto_sync: d.user.auto_sync || false,
+            auto_sync_interval: d.user.auto_sync_interval || 300,
+            notify_otp: d.user.notify_otp !== false,
+            notify_sms: d.user.notify_sms || false,
+          })
         }
       }).catch(() => {})
   }, [])
@@ -49,15 +59,9 @@ export default function SettingsPage() {
   const saveProfile = async (e: React.FormEvent) => {
     e.preventDefault(); setLoad('profile', true)
     try {
-      const r = await fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'profile', name: profile.name, email: profile.email }),
-      })
+      const r = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'profile', name: profile.name, email: profile.email }) })
       const d = await r.json()
-      r.ok
-        ? setMsg('profile', 'success', 'Profile updated successfully')
-        : setMsg('profile', 'error', d.error || 'Failed to update profile')
+      r.ok ? setMsg('profile', 'success', 'Profile updated successfully') : setMsg('profile', 'error', d.error || 'Failed')
     } catch { setMsg('profile', 'error', 'Network error') }
     setLoad('profile', false)
   }
@@ -68,18 +72,10 @@ export default function SettingsPage() {
     if (passwords.new.length < 6) { setMsg('password', 'error', 'Password must be at least 6 characters'); return }
     setLoad('password', true)
     try {
-      const r = await fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'password', old: passwords.old, new: passwords.new }),
-      })
+      const r = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'password', old: passwords.old, new: passwords.new }) })
       const d = await r.json()
-      if (r.ok) {
-        setMsg('password', 'success', 'Password changed successfully')
-        setPasswords({ old: '', new: '', confirm: '' })
-      } else {
-        setMsg('password', 'error', d.error || 'Failed to change password')
-      }
+      if (r.ok) { setMsg('password', 'success', 'Password changed'); setPasswords({ old: '', new: '', confirm: '' }) }
+      else setMsg('password', 'error', d.error || 'Failed')
     } catch { setMsg('password', 'error', 'Network error') }
     setLoad('password', false)
   }
@@ -90,52 +86,26 @@ export default function SettingsPage() {
     if (!ivasms.password.trim()) { setMsg('ivasms', 'error', 'Password is required'); return }
     setLoad('ivasms', true)
     try {
-      const r = await fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'ivasms', email: ivasms.email.trim(), password: ivasms.password.trim() }),
-      })
+      const r = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'ivasms', email: ivasms.email.trim(), password: ivasms.password.trim() }) })
       const d = await r.json()
-      if (r.ok) {
-        setMsg('ivasms', 'success', 'iVASMS credentials saved! Click "Save & Test Connection" to verify.')
-        if (d.user) setUser(d.user)
-      } else {
-        setMsg('ivasms', 'error', d.error || 'Failed to save credentials')
-      }
+      if (r.ok) { setMsg('ivasms', 'success', 'iVASMS credentials saved!'); if (d.user) setUser(d.user) }
+      else setMsg('ivasms', 'error', d.error || 'Failed')
     } catch { setMsg('ivasms', 'error', 'Network error') }
     setLoad('ivasms', false)
   }
 
   const testIvasms = async () => {
-    if (!ivasms.email.trim() || !ivasms.password.trim()) {
-      setMsg('ivasms', 'error', 'Enter both email and password first')
-      return
-    }
+    if (!ivasms.email.trim() || !ivasms.password.trim()) { setMsg('ivasms', 'error', 'Enter both email and password first'); return }
     setTestingIvas(true)
     try {
-      // Step 1: Save credentials
-      const saveR = await fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'ivasms', email: ivasms.email.trim(), password: ivasms.password.trim() }),
-      })
-      if (!saveR.ok) {
-        const sd = await saveR.json()
-        setMsg('ivasms', 'error', 'Failed to save: ' + (sd.error || 'Unknown error'))
-        setTestingIvas(false)
-        return
-      }
+      const saveR = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'ivasms', email: ivasms.email.trim(), password: ivasms.password.trim() }) })
+      if (!saveR.ok) { const sd = await saveR.json(); setMsg('ivasms', 'error', 'Failed to save: ' + (sd.error || 'Unknown')); setTestingIvas(false); return }
       const sd = await saveR.json()
       if (sd.user) setUser(sd.user)
-
-      // Step 2: Test sync
       const syncR = await fetch('/api/ivasms/sync', { method: 'POST' })
       const syncD = await syncR.json()
-      if (syncD.success) {
-        setMsg('ivasms', 'success', `Connected! Found ${syncD.count} numbers, ${syncD.smsAdded ?? 0} SMS loaded.`)
-      } else {
-        setMsg('ivasms', 'error', syncD.error || 'Connection test failed — check your credentials.')
-      }
+      if (syncD.success) setMsg('ivasms', 'success', `✅ Connected! ${syncD.count} numbers · ${syncD.smsAdded ?? 0} SMS loaded.`)
+      else setMsg('ivasms', 'error', syncD.error || 'Connection test failed — check credentials.')
     } catch { setMsg('ivasms', 'error', 'Network error during test') }
     setTestingIvas(false)
   }
@@ -143,17 +113,10 @@ export default function SettingsPage() {
   const saveTelegram = async (e: React.FormEvent) => {
     e.preventDefault(); setLoad('telegram', true)
     try {
-      const r = await fetch('/api/telegram/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ botToken: telegram.botToken, chatId: telegram.chatId }),
-      })
+      const r = await fetch('/api/telegram/setup', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ botToken: telegram.botToken, chatId: telegram.chatId }) })
       const d = await r.json()
-      if (r.ok) {
-        setMsg('telegram', 'success', `Bot @${d.bot?.username || 'connected'} successfully`)
-      } else {
-        setMsg('telegram', 'error', d.error || 'Invalid bot token')
-      }
+      if (r.ok) setMsg('telegram', 'success', `Bot @${d.bot?.username || 'connected'} ready`)
+      else setMsg('telegram', 'error', d.error || 'Invalid bot token')
     } catch { setMsg('telegram', 'error', 'Network error') }
     setLoad('telegram', false)
   }
@@ -163,271 +126,352 @@ export default function SettingsPage() {
     try {
       const r = await fetch('/api/telegram/test', { method: 'POST' })
       const d = await r.json()
-      r.ok
-        ? setMsg('telegram', 'success', 'Test message sent to Telegram!')
-        : setMsg('telegram', 'error', d.error || 'Send failed')
+      r.ok ? setMsg('telegram', 'success', '✅ Test message sent!') : setMsg('telegram', 'error', d.error || 'Send failed')
     } catch { setMsg('telegram', 'error', 'Network error') }
     setTestingTg(false)
   }
 
-  const copyToken = () => {
-    navigator.clipboard.writeText(token).catch(() => {})
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  const savePrefs = async (e: React.FormEvent) => {
+    e.preventDefault(); setLoad('prefs', true)
+    try {
+      const r = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'preferences', ...prefs }) })
+      const d = await r.json()
+      r.ok ? setMsg('prefs', 'success', 'Preferences saved') : setMsg('prefs', 'error', d.error || 'Failed')
+    } catch { setMsg('prefs', 'error', 'Network error') }
+    setLoad('prefs', false)
+  }
+
+  const copy = (text: string, key: string) => {
+    navigator.clipboard.writeText(text).catch(() => {})
+    setCopied(key)
+    setTimeout(() => setCopied(null), 2000)
   }
 
   const regenerateToken = async () => {
-    if (!confirm('Regenerate mobile token? Existing DLChat connections will be invalidated.')) return
+    if (!confirm('Regenerate mobile token? Existing DLChat connections will break.')) return
     try {
-      const r = await fetch('/api/settings', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'regenerate_token' }),
-      })
+      const r = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'regenerate_token' }) })
       const d = await r.json()
-      if (r.ok && d.user?.mobile_token) {
-        setToken(d.user.mobile_token)
-        setMsg('token', 'success', 'Token regenerated successfully')
-      }
+      if (r.ok && d.user?.mobile_token) { setToken(d.user.mobile_token); setMsg('token', 'success', 'Token regenerated') }
     } catch {}
   }
 
-  const Section = ({ icon, title, children }: any) => (
+  const regenerateApiKey = async () => {
+    if (!confirm('Regenerate API key? Existing integrations will break.')) return
+    try {
+      const r = await fetch('/api/apikeys/regenerate', { method: 'POST' })
+      const d = await r.json()
+      if (d.key) { setApiKey(d.key); setMsg('token', 'success', 'API key regenerated') }
+    } catch {}
+  }
+
+  const Section = ({ icon, title, badge, children }: any) => (
     <div className="card" style={{ marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, paddingBottom: 14, borderBottom: '1px solid var(--border)' }}>
         <div style={{ width: 36, height: 36, borderRadius: 9, background: 'rgba(229,9,20,.1)', border: '1px solid rgba(229,9,20,.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
           <i className={`bi ${icon}`} style={{ fontSize: 17, color: 'var(--accent)' }} />
         </div>
-        <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{title}</h3>
+        <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)', flex: 1 }}>{title}</h3>
+        {badge && <span style={{ fontSize: 10, fontWeight: 700, background: 'var(--green-dim)', color: 'var(--green)', border: '1px solid rgba(0,230,118,.2)', padding: '2px 8px', borderRadius: 10 }}>{badge}</span>}
       </div>
       {children}
     </div>
   )
 
   return (
-    <div style={{ maxWidth: 720 }}>
+    <div style={{ maxWidth: 760 }}>
       <div style={{ marginBottom: 24 }}>
         <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 10 }}>
           <i className="bi bi-gear-fill" style={{ color: 'var(--accent)', fontSize: 20 }} />Settings
         </h2>
-        <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 4 }}>Configure account, iVASMS credentials, Telegram and mobile app</p>
+        <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 4 }}>Configure your account, iVASMS, Telegram, and preferences</p>
       </div>
 
-      {/* ── Profile ── */}
-      <Section icon="bi-person-fill" title="Profile">
-        <form onSubmit={saveProfile}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <div className="form-group">
-              <label className="form-label">Display Name</label>
-              <div className="input-group">
-                <i className="bi bi-person-fill input-icon" />
-                <input value={profile.name} onChange={e => setProfile(p => ({ ...p, name: e.target.value }))} placeholder="Your name" />
-              </div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Email</label>
-              <div className="input-group">
-                <i className="bi bi-envelope-fill input-icon" />
-                <input type="email" value={profile.email} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} placeholder="your@email.com" />
-              </div>
-            </div>
-          </div>
-          <button type="submit" className="btn-primary btn-sm" disabled={loading.profile}>
-            <i className="bi bi-save-fill" style={{ fontSize: 13 }} />
-            {loading.profile ? 'Saving…' : 'Save Profile'}
+      {/* Tabs */}
+      <div className="tab-bar" style={{ marginBottom: 20 }}>
+        {[
+          { id: 'account',      icon: 'bi-person-fill',    label: 'Account'      },
+          { id: 'integrations', icon: 'bi-plug-fill',      label: 'Integrations' },
+          { id: 'preferences',  icon: 'bi-sliders',        label: 'Preferences'  },
+          { id: 'token',        icon: 'bi-key-fill',       label: 'Keys & Tokens'},
+        ].map(t => (
+          <button key={t.id} className={`tab-item ${tab === t.id ? 'active' : ''}`} onClick={() => setTab(t.id as any)}>
+            <i className={`bi ${t.icon}`} style={{ marginRight: 6, fontSize: 12 }} />{t.label}
           </button>
-          <MsgBox msg={msgs.profile} />
-        </form>
-      </Section>
+        ))}
+      </div>
 
-      {/* ── Password ── */}
-      <Section icon="bi-lock-fill" title="Change Password">
-        <form onSubmit={savePassword}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 14 }}>
-            <div className="form-group">
-              <label className="form-label">Current Password</label>
-              <div className="input-group" style={{ position: 'relative' }}>
-                <i className="bi bi-lock-fill input-icon" />
-                <input
-                  type={showPwd ? 'text' : 'password'}
-                  value={passwords.old}
-                  onChange={e => setPasswords(p => ({ ...p, old: e.target.value }))}
-                  placeholder="Current password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPwd(p => !p)}
-                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', padding: 4, cursor: 'pointer', width: 'auto' }}
-                >
-                  <i className={`bi ${showPwd ? 'bi-eye-slash-fill' : 'bi-eye-fill'}`} style={{ fontSize: 15 }} />
+      {/* ── Account tab ── */}
+      {tab === 'account' && (
+        <>
+          <Section icon="bi-person-fill" title="Profile">
+            <form onSubmit={saveProfile}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div className="form-group">
+                  <label className="form-label">Display Name</label>
+                  <div className="input-group">
+                    <i className="bi bi-person-fill input-icon" />
+                    <input value={profile.name} onChange={e => setProfile(p => ({ ...p, name: e.target.value }))} placeholder="Your name" />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Email</label>
+                  <div className="input-group">
+                    <i className="bi bi-envelope-fill input-icon" />
+                    <input type="email" value={profile.email} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))} placeholder="your@email.com" />
+                  </div>
+                </div>
+              </div>
+              {user && (
+                <div style={{ fontSize: 11, color: 'var(--text3)', marginBottom: 12, display: 'flex', gap: 16 }}>
+                  <span><i className="bi bi-calendar3" style={{ marginRight: 5 }} />Joined {new Date(user.created_at || Date.now()).toLocaleDateString()}</span>
+                  {user.last_sync && <span><i className="bi bi-arrow-repeat" style={{ marginRight: 5 }} />Last sync {new Date(user.last_sync).toLocaleString()}</span>}
+                  {user.sync_count > 0 && <span><i className="bi bi-check2-all" style={{ marginRight: 5 }} />{user.sync_count} syncs total</span>}
+                </div>
+              )}
+              <button type="submit" className="btn-primary btn-sm" disabled={loading.profile}>
+                <i className="bi bi-save-fill" style={{ fontSize: 13 }} />
+                {loading.profile ? 'Saving…' : 'Save Profile'}
+              </button>
+              <MsgBox msg={msgs.profile} />
+            </form>
+          </Section>
+
+          <Section icon="bi-lock-fill" title="Change Password">
+            <form onSubmit={savePassword}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginBottom: 14 }}>
+                <div className="form-group">
+                  <label className="form-label">Current Password</label>
+                  <div className="input-group" style={{ position: 'relative' }}>
+                    <i className="bi bi-lock-fill input-icon" />
+                    <input type={showPwd ? 'text' : 'password'} value={passwords.old} onChange={e => setPasswords(p => ({ ...p, old: e.target.value }))} placeholder="Current password" />
+                    <button type="button" onClick={() => setShowPwd(p => !p)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', padding: 4, cursor: 'pointer', width: 'auto' }}>
+                      <i className={`bi ${showPwd ? 'bi-eye-slash-fill' : 'bi-eye-fill'}`} style={{ fontSize: 15 }} />
+                    </button>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                  <div className="form-group">
+                    <label className="form-label">New Password</label>
+                    <input type="password" value={passwords.new} onChange={e => setPasswords(p => ({ ...p, new: e.target.value }))} placeholder="Min 6 characters" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Confirm New Password</label>
+                    <input type="password" value={passwords.confirm} onChange={e => setPasswords(p => ({ ...p, confirm: e.target.value }))} placeholder="Repeat new password" />
+                  </div>
+                </div>
+              </div>
+              <button type="submit" className="btn-primary btn-sm" disabled={loading.password}>
+                <i className="bi bi-lock-fill" style={{ fontSize: 13 }} />
+                {loading.password ? 'Changing…' : 'Change Password'}
+              </button>
+              <MsgBox msg={msgs.password} />
+            </form>
+          </Section>
+        </>
+      )}
+
+      {/* ── Integrations tab ── */}
+      {tab === 'integrations' && (
+        <>
+          <Section icon="bi-phone-fill" title="iVASMS Credentials" badge={user?.ivasms_email ? 'Connected' : undefined}>
+            <div className="alert alert-info" style={{ marginBottom: 16 }}>
+              <i className="bi bi-info-circle-fill" />
+              <div>Enter your <strong>iVASMS.com</strong> account email and password. Click <strong>Save & Test</strong> to verify and auto-sync numbers and SMS.</div>
+            </div>
+            <form onSubmit={saveIvasms}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div className="form-group">
+                  <label className="form-label">iVASMS Email</label>
+                  <div className="input-group">
+                    <i className="bi bi-envelope-fill input-icon" />
+                    <input type="email" value={ivasms.email} onChange={e => setIvasms(p => ({ ...p, email: e.target.value }))} placeholder="ohlivvy53@gmail.com" autoComplete="off" />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">iVASMS Password</label>
+                  <div className="input-group" style={{ position: 'relative' }}>
+                    <i className="bi bi-lock-fill input-icon" />
+                    <input type={showIvasPwd ? 'text' : 'password'} value={ivasms.password} onChange={e => setIvasms(p => ({ ...p, password: e.target.value }))} placeholder="Your iVASMS password" autoComplete="new-password" />
+                    <button type="button" onClick={() => setShowIvasPwd(p => !p)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', padding: 4, cursor: 'pointer', width: 'auto' }}>
+                      <i className={`bi ${showIvasPwd ? 'bi-eye-slash-fill' : 'bi-eye-fill'}`} style={{ fontSize: 15 }} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+                <button type="submit" className="btn-primary btn-sm" disabled={loading.ivasms}>
+                  <i className="bi bi-save-fill" style={{ fontSize: 13 }} />
+                  {loading.ivasms ? 'Saving…' : 'Save Credentials'}
+                </button>
+                <button type="button" onClick={testIvasms} disabled={testingIvas || !ivasms.email.trim() || !ivasms.password.trim()} className="btn-success btn-sm">
+                  <i className="bi bi-arrow-repeat" style={{ animation: testingIvas ? 'spin 1s linear infinite' : 'none', display: 'inline-block', fontSize: 13 }} />
+                  {testingIvas ? 'Testing & Syncing…' : 'Save & Test Connection'}
                 </button>
               </div>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <div className="form-group">
-                <label className="form-label">New Password</label>
-                <input type="password" value={passwords.new} onChange={e => setPasswords(p => ({ ...p, new: e.target.value }))} placeholder="Min 6 characters" />
+              <MsgBox msg={msgs.ivasms} />
+            </form>
+            {user?.ivasms_email && (
+              <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--green-dim)', border: '1px solid rgba(0,230,118,.25)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                <span className="dot dot-green dot-pulse" />
+                <span style={{ color: 'var(--green)', fontWeight: 600 }}>Saved:</span>
+                <span style={{ color: 'var(--text2)', fontFamily: 'monospace' }}>{user.ivasms_email}</span>
               </div>
-              <div className="form-group">
-                <label className="form-label">Confirm New Password</label>
-                <input type="password" value={passwords.confirm} onChange={e => setPasswords(p => ({ ...p, confirm: e.target.value }))} placeholder="Repeat new password" />
-              </div>
-            </div>
-          </div>
-          <button type="submit" className="btn-primary btn-sm" disabled={loading.password}>
-            <i className="bi bi-lock-fill" style={{ fontSize: 13 }} />
-            {loading.password ? 'Changing…' : 'Change Password'}
-          </button>
-          <MsgBox msg={msgs.password} />
-        </form>
-      </Section>
+            )}
+          </Section>
 
-      {/* ── iVASMS ── */}
-      <Section icon="bi-phone-fill" title="iVASMS Credentials">
-        <div className="alert alert-info" style={{ marginBottom: 16 }}>
-          <i className="bi bi-info-circle-fill" />
-          <div>
-            <strong>How to connect:</strong> Enter your <strong>iVASMS.com</strong> account email and password,
-            then click <strong>Save &amp; Test Connection</strong>. This will save your credentials and
-            automatically sync your numbers and SMS messages.
-          </div>
-        </div>
-        <form onSubmit={saveIvasms}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <div className="form-group">
-              <label className="form-label">iVASMS Email</label>
-              <div className="input-group">
-                <i className="bi bi-envelope-fill input-icon" />
-                <input
-                  type="email"
-                  value={ivasms.email}
-                  onChange={e => setIvasms(p => ({ ...p, email: e.target.value }))}
-                  placeholder="ohlivvy53@gmail.com"
-                  autoComplete="off"
-                />
-              </div>
+          <Section icon="bi-telegram" title="Telegram Bot">
+            <div className="alert alert-info" style={{ marginBottom: 16 }}>
+              <i className="bi bi-info-circle-fill" />
+              <div>Create a bot via <strong>@BotFather</strong> on Telegram. Get your Chat ID from <strong>@userinfobot</strong>.</div>
             </div>
-            <div className="form-group">
-              <label className="form-label">iVASMS Password</label>
-              <div className="input-group" style={{ position: 'relative' }}>
-                <i className="bi bi-lock-fill input-icon" />
-                <input
-                  type={showIvasPwd ? 'text' : 'password'}
-                  value={ivasms.password}
-                  onChange={e => setIvasms(p => ({ ...p, password: e.target.value }))}
-                  placeholder="Your iVASMS password"
-                  autoComplete="new-password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowIvasPwd(p => !p)}
-                  style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', padding: 4, cursor: 'pointer', width: 'auto' }}
-                >
-                  <i className={`bi ${showIvasPwd ? 'bi-eye-slash-fill' : 'bi-eye-fill'}`} style={{ fontSize: 15 }} />
+            <form onSubmit={saveTelegram}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
+                <div className="form-group">
+                  <label className="form-label">Bot Token</label>
+                  <div className="input-group">
+                    <i className="bi bi-key-fill input-icon" />
+                    <input type="password" value={telegram.botToken} onChange={e => setTelegram(p => ({ ...p, botToken: e.target.value }))} placeholder="1234567890:ABCdef…" />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Chat ID</label>
+                  <div className="input-group">
+                    <i className="bi bi-hash input-icon" />
+                    <input value={telegram.chatId} onChange={e => setTelegram(p => ({ ...p, chatId: e.target.value }))} placeholder="-100123456789" />
+                  </div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                <button type="submit" className="btn-primary btn-sm" disabled={loading.telegram}>
+                  <i className="bi bi-save-fill" style={{ fontSize: 13 }} />{loading.telegram ? 'Saving…' : 'Save Telegram'}
+                </button>
+                <button type="button" onClick={testTelegram} disabled={testingTg || !telegram.botToken} className="btn-secondary btn-sm">
+                  <i className="bi bi-send-fill" style={{ fontSize: 12 }} />{testingTg ? 'Sending…' : 'Send Test Message'}
                 </button>
               </div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-            <button type="submit" className="btn-primary btn-sm" disabled={loading.ivasms}>
-              <i className="bi bi-save-fill" style={{ fontSize: 13 }} />
-              {loading.ivasms ? 'Saving…' : 'Save Credentials'}
-            </button>
-            <button
-              type="button"
-              onClick={testIvasms}
-              disabled={testingIvas || !ivasms.email.trim() || !ivasms.password.trim()}
-              className="btn-success btn-sm"
-            >
-              <i className="bi bi-arrow-repeat" style={{ animation: testingIvas ? 'spin 1s linear infinite' : 'none', display: 'inline-block', fontSize: 13 }} />
-              {testingIvas ? 'Testing & Syncing…' : 'Save & Test Connection'}
-            </button>
-          </div>
-          <MsgBox msg={msgs.ivasms} />
-        </form>
+              <MsgBox msg={msgs.telegram} />
+            </form>
+          </Section>
+        </>
+      )}
 
-        {/* Show saved email status */}
-        {user?.ivasms_email && (
-          <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--green-dim)', border: '1px solid rgba(0,230,118,.25)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-            <span className="dot dot-green dot-pulse" />
-            <span style={{ color: 'var(--green)', fontWeight: 600 }}>Saved:</span>
-            <span style={{ color: 'var(--text2)', fontFamily: 'monospace' }}>{user.ivasms_email}</span>
-          </div>
-        )}
-      </Section>
+      {/* ── Preferences tab ── */}
+      {tab === 'preferences' && (
+        <Section icon="bi-sliders" title="Preferences & Automation">
+          <form onSubmit={savePrefs}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18, marginBottom: 20 }}>
 
-      {/* ── Telegram ── */}
-      <Section icon="bi-telegram" title="Telegram Bot">
-        <div className="alert alert-info" style={{ marginBottom: 16 }}>
-          <i className="bi bi-info-circle-fill" />
-          <div>Create a bot via <strong>@BotFather</strong> on Telegram, then get your Chat ID from <strong>@userinfobot</strong>.</div>
-        </div>
-        <form onSubmit={saveTelegram}>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-            <div className="form-group">
-              <label className="form-label">Bot Token</label>
-              <div className="input-group">
-                <i className="bi bi-key-fill input-icon" />
-                <input
-                  type="password"
-                  value={telegram.botToken}
-                  onChange={e => setTelegram(p => ({ ...p, botToken: e.target.value }))}
-                  placeholder="1234567890:ABCdef…"
-                />
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 3 }}>
+                    <i className="bi bi-arrow-repeat" style={{ marginRight: 8, color: 'var(--accent)' }} />
+                    Auto Sync iVASMS
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)' }}>Automatically sync numbers and SMS on a schedule</div>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={prefs.auto_sync} onChange={e => setPrefs(p => ({ ...p, auto_sync: e.target.checked }))} />
+                  <span className="switch-slider" />
+                </label>
+              </div>
+
+              {prefs.auto_sync && (
+                <div className="form-group">
+                  <label className="form-label">Auto Sync Interval</label>
+                  <select value={prefs.auto_sync_interval} onChange={e => setPrefs(p => ({ ...p, auto_sync_interval: Number(e.target.value) }))}>
+                    <option value={60}>Every 1 minute</option>
+                    <option value={180}>Every 3 minutes</option>
+                    <option value={300}>Every 5 minutes</option>
+                    <option value={600}>Every 10 minutes</option>
+                    <option value={1800}>Every 30 minutes</option>
+                    <option value={3600}>Every hour</option>
+                  </select>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 3 }}>
+                    <i className="bi bi-key-fill" style={{ marginRight: 8, color: 'var(--yellow)' }} />
+                    Telegram OTP Notifications
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)' }}>Send OTP codes to Telegram when received</div>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={prefs.notify_otp} onChange={e => setPrefs(p => ({ ...p, notify_otp: e.target.checked }))} />
+                  <span className="switch-slider" />
+                </label>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 16px', background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 10 }}>
+                <div>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 3 }}>
+                    <i className="bi bi-chat-dots-fill" style={{ marginRight: 8, color: 'var(--blue)' }} />
+                    All SMS Notifications
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--text3)' }}>Forward every SMS to Telegram (can be noisy)</div>
+                </div>
+                <label className="switch">
+                  <input type="checkbox" checked={prefs.notify_sms} onChange={e => setPrefs(p => ({ ...p, notify_sms: e.target.checked }))} />
+                  <span className="switch-slider" />
+                </label>
               </div>
             </div>
-            <div className="form-group">
-              <label className="form-label">Chat ID</label>
-              <div className="input-group">
-                <i className="bi bi-hash input-icon" />
-                <input
-                  value={telegram.chatId}
-                  onChange={e => setTelegram(p => ({ ...p, chatId: e.target.value }))}
-                  placeholder="-100123456789"
-                />
-              </div>
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            <button type="submit" className="btn-primary btn-sm" disabled={loading.telegram}>
+            <button type="submit" className="btn-primary btn-sm" disabled={loading.prefs}>
               <i className="bi bi-save-fill" style={{ fontSize: 13 }} />
-              {loading.telegram ? 'Saving…' : 'Save Telegram'}
+              {loading.prefs ? 'Saving…' : 'Save Preferences'}
             </button>
-            <button type="button" onClick={testTelegram} disabled={testingTg || !telegram.botToken} className="btn-secondary btn-sm">
-              <i className="bi bi-send-fill" style={{ fontSize: 12 }} />
-              {testingTg ? 'Sending…' : 'Send Test Message'}
-            </button>
-          </div>
-          <MsgBox msg={msgs.telegram} />
-        </form>
-      </Section>
+            <MsgBox msg={msgs.prefs} />
+          </form>
+        </Section>
+      )}
 
-      {/* ── Mobile Token ── */}
-      <Section icon="bi-android2" title="DLChat Mobile App Token">
-        <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 16, lineHeight: 1.6 }}>
-          Use this token in the DLChat mobile app or PWA to connect to your account. Keep it secret — anyone with this token can access your SMS data.
-        </p>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
-          <div style={{
-            flex: 1, background: 'var(--bg2)', border: '1px solid var(--border)',
-            borderRadius: 8, padding: '10px 14px',
-            fontFamily: 'monospace', fontSize: 13, color: 'var(--text)',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            minWidth: 0,
-          }}>
-            {token || 'No token generated'}
-          </div>
-          <button onClick={copyToken} className="btn-secondary btn-sm" style={{ flexShrink: 0 }}>
-            <i className={`bi ${copied ? 'bi-clipboard-check-fill' : 'bi-clipboard-fill'}`} style={{ fontSize: 13 }} />
-            {copied ? 'Copied!' : 'Copy'}
-          </button>
-          <button onClick={regenerateToken} className="btn-danger btn-sm" style={{ flexShrink: 0 }}>
-            <i className="bi bi-arrow-repeat" style={{ fontSize: 13 }} />
-            Regenerate
-          </button>
-        </div>
-        <MsgBox msg={msgs.token} />
-      </Section>
+      {/* ── Keys & Tokens tab ── */}
+      {tab === 'token' && (
+        <>
+          <Section icon="bi-android2" title="DLChat Mobile Token">
+            <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.6 }}>
+              Use this token in the DLChat mobile app or PWA. Keep it secret.
+            </p>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+              <div style={{ flex: 1, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', fontFamily: 'monospace', fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                {token || 'No token generated'}
+              </div>
+              <button onClick={() => copy(token, 'token')} className={copied === 'token' ? 'btn-success btn-sm' : 'btn-secondary btn-sm'} style={{ flexShrink: 0 }}>
+                <i className={`bi ${copied === 'token' ? 'bi-clipboard-check-fill' : 'bi-clipboard-fill'}`} style={{ fontSize: 13 }} />
+                {copied === 'token' ? 'Copied!' : 'Copy'}
+              </button>
+              <button onClick={regenerateToken} className="btn-danger btn-sm" style={{ flexShrink: 0 }}>
+                <i className="bi bi-arrow-repeat" style={{ fontSize: 13 }} />Regenerate
+              </button>
+            </div>
+            <MsgBox msg={msgs.token} />
+          </Section>
+
+          <Section icon="bi-code-slash" title="REST API Key">
+            <p style={{ fontSize: 13, color: 'var(--text2)', marginBottom: 14, lineHeight: 1.6 }}>
+              Use this key in the <code style={{ background: 'var(--bg2)', padding: '2px 6px', borderRadius: 4, fontSize: 11 }}>X-API-Key</code> header to authenticate external API requests.
+            </p>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 }}>
+              <div style={{ flex: 1, background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8, padding: '10px 14px', fontFamily: 'monospace', fontSize: 12, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                {apiKey || 'Loading…'}
+              </div>
+              <button onClick={() => copy(apiKey, 'apikey')} className={copied === 'apikey' ? 'btn-success btn-sm' : 'btn-secondary btn-sm'} style={{ flexShrink: 0 }}>
+                <i className={`bi ${copied === 'apikey' ? 'bi-clipboard-check-fill' : 'bi-clipboard-fill'}`} style={{ fontSize: 13 }} />
+                {copied === 'apikey' ? 'Copied!' : 'Copy'}
+              </button>
+              <button onClick={regenerateApiKey} className="btn-danger btn-sm" style={{ flexShrink: 0 }}>
+                <i className="bi bi-arrow-repeat" style={{ fontSize: 13 }} />Regenerate
+              </button>
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 6 }}>
+              <i className="bi bi-info-circle" style={{ marginRight: 5 }} />
+              See <a href="/api-keys" style={{ color: 'var(--blue)', textDecoration: 'none' }}>API & Docs</a> for all available endpoints.
+            </div>
+          </Section>
+        </>
+      )}
     </div>
   )
 }
