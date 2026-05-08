@@ -2522,3 +2522,147 @@ tbody tr:hover { background: rgba(255,255,255,.02); }
 .animate-slidein  { animation: slideInLeft .3s ease forwards; }
 .animate-bounce   { animation: bounce 1s ease infinite; }
 .animate-glow     { animation: glowPulse 2s ease-in-out infinite; }
+
+/* ── Spin utility (used on bi-arrow-repeat icons) ── */
+.spin { display: inline-block; animation: spin .8s linear infinite; }
+
+/* ── Heartbeat / live-connected bar ── */
+.hb-bar {
+  display: flex; align-items: center; gap: 5px;
+  padding: 4px 10px; border-radius: 7px; font-size: 11px; font-weight: 700;
+  transition: all .3s;
+}
+.hb-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  animation: livePulse 1.5s ease-in-out infinite;
+}
+
+/* ── Device card ── */
+.device-card {
+  display: flex; align-items: center; gap: 14px; padding: 14px 16px;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 12px;
+  transition: border-color .15s;
+}
+.device-card:hover { border-color: rgba(37,211,102,.25); }
+.device-icon-wrap {
+  width: 44px; height: 44px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 22px; flex-shrink: 0;
+}
+
+/* ── Broadcast row ── */
+.broadcast-row {
+  padding: 10px 14px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; transition: border-color .15s;
+}
+.broadcast-row:hover { border-color: var(--border2); }
+
+/* ── Connectivity badge ── */
+.conn-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 20px; font-size: 12px; font-weight: 700;
+  white-space: nowrap; transition: all .3s;
+}
+.conn-badge-live {
+  background: rgba(0,230,118,.08); color: var(--green);
+  border: 1px solid rgba(0,230,118,.25);
+}
+.conn-badge-offline {
+  background: rgba(229,9,20,.08); color: var(--accent);
+  border: 1px solid rgba(229,9,20,.25);
+}
+
+/* ── Latency chip ── */
+.latency-chip {
+  font-size: 9px; font-weight: 600; opacity: .7;
+  padding: 1px 4px; border-radius: 4px;
+  background: rgba(255,255,255,.06);
+}
+
+/* ── New SMS flash badge ── */
+.new-sms-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--accent); color: #fff;
+  font-size: 9.5px; font-weight: 700;
+  padding: 2px 7px; border-radius: 5px;
+  animation: fadeIn .3s ease, bounce .5s ease;
+}
+
+/* ── Ghost button ── */
+.btn-ghost {
+  background: transparent; border: 1px solid var(--border);
+  color: var(--text3); padding: 6px 12px; border-radius: 7px;
+  font-size: 12px; font-weight: 600;
+  display: inline-flex; align-items: center; gap: 5px;
+  cursor: pointer; transition: all .15s;
+}
+.btn-ghost:hover { background: var(--bg2); color: var(--text2); border-color: var(--border2); }
+
+/* ── Primary button (if not already defined) ── */
+.btn-primary {
+  background: var(--blue); color: #fff; padding: 9px 16px; border-radius: 8px;
+  font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;
+  cursor: pointer; transition: all .15s; border: none;
+}
+.btn-primary:hover:not(:disabled) { background: #1a6ecc; }
+.btn-primary:disabled { opacity: .5; cursor: default; }
+
+/* ── Danger button ── */
+.btn-danger {
+  background: rgba(244,67,54,.12); color: var(--red); border: 1px solid rgba(244,67,54,.25);
+  padding: 8px 14px; border-radius: 8px; font-size: 12px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: all .15s;
+}
+.btn-danger:hover:not(:disabled) { background: rgba(244,67,54,.22); }
+.btn-danger:disabled { opacity: .5; cursor: default; }
+
+/* ── Small button variant ── */
+.btn-sm { padding: 5px 10px !important; font-size: 12px !important; border-radius: 7px !important; }
+
+/* ── WhatsApp green button ── */
+.btn-success {
+  background: rgba(37,211,102,.12); color: #25d366; border: 1px solid rgba(37,211,102,.3);
+  padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; transition: all .15s;
+}
+.btn-success:hover:not(:disabled) { background: rgba(37,211,102,.22); }
+.btn-success:disabled { opacity: .5; cursor: default; }
+
+/* ── Secondary button ── */
+.btn-secondary {
+  background: rgba(255,255,255,.06); color: var(--text2); border: 1px solid var(--border);
+  padding: 9px 16px; border-radius: 8px; font-size: 13px; font-weight: 700;
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer; transition: all .15s;
+}
+.btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,.1); border-color: var(--border2); }
+.btn-secondary:disabled { opacity: .5; cursor: default; }
+
+/* ── Country flag emoji ── */
+.country-flag { font-size: 18px; line-height: 1; }
+
+/* ── Responsive fix for narrow screens ── */
+@media (max-width: 600px) {
+  .tab-bar { flex-wrap: wrap; }
+  .tab-item { flex: none; min-width: 45%; }
+  .stats-grid { grid-template-columns: 1fr 1fr; }
+  .two-col { grid-template-columns: 1fr; }
+}
+
+/* ── Pulse ring for active number ── */
+.pulse-ring {
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+
+/* ── Number status badges ── */
+.badge-active   { background: rgba(0,230,118,.12); color: var(--green);  border: 1px solid rgba(0,230,118,.25); padding: 2px 8px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+.badge-inactive { background: rgba(255,152,0,.1);  color: var(--orange); border: 1px solid rgba(255,152,0,.25); padding: 2px 8px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+.badge-expired  { background: rgba(244,67,54,.1);  color: var(--red);    border: 1px solid rgba(244,67,54,.25); padding: 2px 8px; border-radius: 5px; font-size: 10px; font-weight: 700; }
+.badge-hot      { background: var(--accent); color: #fff; padding: 1px 5px; border-radius: 3px; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .3px; }
+.badge-new      { background: var(--green);  color: #000; padding: 1px 5px; border-radius: 3px; font-size: 8px; font-weight: 800; text-transform: uppercase; letter-spacing: .3px; }
+
+/* ── Always-connected glow effect when heartbeat is live ── */
+@keyframes hbGlow {
+  0%,100% { box-shadow: 0 0 0 0 rgba(0,230,118,0); }
+  50%      { box-shadow: 0 0 8px 2px rgba(0,230,118,.25); }
+}
+.hb-live { animation: hbGlow 3s ease-in-out infinite; }

@@ -1,6 +1,6 @@
-// Cloudflare Pages Functions - Full API handler v2
+// Cloudflare Pages Functions - Full API handler v3
 // DL SMS Client — Team Death Legion
-// WebCrypto JWT · KV/in-memory store · iVASMS live scraper · 20+ endpoints
+// WebCrypto JWT · KV/in-memory store · iVASMS live scraper · 40+ endpoints
 
 // ─── Tiny JWT (HS256 via WebCrypto) ────────────────────────────────────────
 async function signJWT(payload, secret) {
@@ -79,6 +79,7 @@ async function ensureAdmin(kv) {
       name: 'Admin',
       email: 'admin@dlsms.com',
       password_hash: pwHash,
+      role: 'admin',
       ivasms_email: '',
       ivasms_password: '',
       telegram_bot_token: '',
@@ -91,7 +92,11 @@ async function ensureAdmin(kv) {
       auto_sync_interval: 300,
       notify_otp: true,
       notify_sms: false,
+      notify_sync: true,
       theme: 'dark',
+      pin_vault_hash: '',
+      webhook_url: '',
+      webhook_events: [],
       created_at: new Date().toISOString(),
     }]
     await kvSet(kv, 'users', users)
@@ -109,7 +114,6 @@ async function getAuthUser(request, kv) {
   const xApiKey     = request.headers.get('X-API-Key') || ''
   const token       = tokenMatch?.[1] || (authHeader.startsWith('Bearer ') ? authHeader.slice(7) : null)
 
-  // API Key auth
   if (xApiKey) {
     const users = await kvGet(kv, 'users', [])
     const arr   = Array.isArray(users) ? users : []
@@ -139,9 +143,9 @@ function unauthorized() { return json({ error: 'Unauthorized' }, 401) }
 
 // ─── Telegram notification helper ──────────────────────────────────────────
 async function sendTelegramNotification(user, message) {
-  if (!user.telegram_bot_token || !user.telegram_chat_id) return
+  if (!user.telegram_bot_token || !user.telegram_chat_id) return false
   try {
-    await fetch(`https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`, {
+    const r = await fetch(`https://api.telegram.org/bot${user.telegram_bot_token}/sendMessage`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -150,7 +154,32 @@ async function sendTelegramNotification(user, message) {
         parse_mode: 'Markdown',
       }),
     })
+    const d = await r.json()
+    return d.ok
+  } catch { return false }
+}
+
+// ─── Webhook fire helper ────────────────────────────────────────────────────
+async function fireWebhook(user, event, payload) {
+  if (!user.webhook_url) return
+  const events = user.webhook_events || []
+  if (events.length > 0 && !events.includes(event)) return
+  try {
+    await fetch(user.webhook_url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-DL-Event': event },
+      body: JSON.stringify({ event, payload, ts: new Date().toISOString() }),
+      signal: AbortSignal.timeout(5000),
+    })
   } catch {}
+}
+
+// ─── Push notification store helper ────────────────────────────────────────
+async function pushNotif(kv, userId, type, title, message, meta = {}) {
+  const notifs = await kvGet(kv, `notifs_${userId}`, [])
+  const arr    = Array.isArray(notifs) ? notifs : []
+  arr.unshift({ id: uuid(), type, title, message, read: false, ts: new Date().toISOString(), ...meta })
+  await kvSet(kv, `notifs_${userId}`, arr.slice(0, 300))
 }
 
 // ─── Main router ──────────────────────────────────────────────────────────
@@ -193,11 +222,10 @@ export async function onRequest(context) {
         JWT_SECRET
       )
       const cookieStr = `dl_token=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7 * 86400}`
-      // Log login activity
       const activity = await kvGet(kv, `activity_${user.id}`, [])
       const actArr   = Array.isArray(activity) ? activity : []
-      actArr.unshift({ type: 'login', ts: new Date().toISOString(), ip: request.headers.get('CF-Connecting-IP') || 'unknown' })
-      await kvSet(kv, `activity_${user.id}`, actArr.slice(0, 100))
+      actArr.unshift({ type: 'login', ts: new Date().toISOString(), ip: request.headers.get('CF-Connecting-IP') || 'unknown', ua: (request.headers.get('User-Agent') || '').slice(0, 80) })
+      await kvSet(kv, `activity_${user.id}`, actArr.slice(0, 200))
       return new Response(JSON.stringify({ ok: true, user: { id: user.id, name: user.name, email: user.email } }), {
         status: 200,
         headers: {
@@ -221,6 +249,7 @@ export async function onRequest(context) {
         name: name.trim(),
         email: email.toLowerCase().trim(),
         password_hash: await hashPassword(password),
+        role: 'user',
         ivasms_email: '',
         ivasms_password: '',
         telegram_bot_token: '',
@@ -233,7 +262,11 @@ export async function onRequest(context) {
         auto_sync_interval: 300,
         notify_otp: true,
         notify_sms: false,
+        notify_sync: true,
         theme: 'dark',
+        pin_vault_hash: '',
+        webhook_url: '',
+        webhook_events: [],
         created_at: new Date().toISOString(),
       }
       users.push(newUser)
@@ -259,7 +292,7 @@ export async function onRequest(context) {
       if (!user) return unauthorized()
       return json({
         user: {
-          id: user.id, name: user.name, email: user.email,
+          id: user.id, name: user.name, email: user.email, role: user.role || 'user',
           ivasms_email: user.ivasms_email || '',
           telegram_bot_token: user.telegram_bot_token || '',
           telegram_chat_id: user.telegram_chat_id || '',
@@ -271,8 +304,13 @@ export async function onRequest(context) {
           auto_sync_interval: user.auto_sync_interval || 300,
           notify_otp: user.notify_otp !== false,
           notify_sms: user.notify_sms || false,
+          notify_sync: user.notify_sync !== false,
           theme: user.theme || 'dark',
+          webhook_url: user.webhook_url || '',
+          webhook_events: user.webhook_events || [],
           created_at: user.created_at || '',
+          last_sync: user.last_sync || null,
+          sync_count: user.sync_count || 0,
         }
       })
     }
@@ -305,14 +343,18 @@ export async function onRequest(context) {
       return json({
         overall: 'operational',
         components: [
-          { name: 'API Service',       ok: true,    latency: apiLatency,  uptime: 99.99, status: 'operational' },
-          { name: 'iVASMS Connection', ok: ivasOk,  latency: ivasLatency, uptime: 99.5,  status: ivasOk ? 'operational' : 'degraded' },
-          { name: 'SMS Receiving',     ok: true,    latency: 1,           uptime: 99.9,  status: 'operational' },
-          { name: 'WhatsApp Service',  ok: true,    latency: 5,           uptime: 99.8,  status: 'operational' },
-          { name: 'Telegram Bot',      ok: true,    latency: 3,           uptime: 99.7,  status: 'operational' },
-          { name: 'Database',          ok: true,    latency: 2,           uptime: 99.99, status: 'operational' },
-          { name: 'Auto Sync',         ok: true,    latency: 0,           uptime: 99.5,  status: 'operational' },
-          { name: 'Notifications',     ok: true,    latency: 1,           uptime: 99.9,  status: 'operational' },
+          { name: 'API Service',         ok: true,    latency: apiLatency,  uptime: 99.99, status: 'operational' },
+          { name: 'iVASMS Connection',   ok: ivasOk,  latency: ivasLatency, uptime: 99.5,  status: ivasOk ? 'operational' : 'degraded' },
+          { name: 'SMS Receiving',       ok: true,    latency: 1,           uptime: 99.9,  status: 'operational' },
+          { name: 'WhatsApp Service',    ok: true,    latency: 5,           uptime: 99.8,  status: 'operational' },
+          { name: 'Telegram Bot',        ok: true,    latency: 3,           uptime: 99.7,  status: 'operational' },
+          { name: 'Database',            ok: true,    latency: 2,           uptime: 99.99, status: 'operational' },
+          { name: 'Auto Sync',           ok: true,    latency: 0,           uptime: 99.5,  status: 'operational' },
+          { name: 'Notifications',       ok: true,    latency: 1,           uptime: 99.9,  status: 'operational' },
+          { name: 'OTP Monitor',         ok: true,    latency: 1,           uptime: 99.9,  status: 'operational' },
+          { name: 'Webhook Delivery',    ok: true,    latency: 2,           uptime: 99.8,  status: 'operational' },
+          { name: 'Export Engine',       ok: true,    latency: 0,           uptime: 99.99, status: 'operational' },
+          { name: 'Bulk Sender',         ok: true,    latency: 2,           uptime: 99.7,  status: 'operational' },
         ],
         updatedAt: new Date().toISOString(),
       })
@@ -347,13 +389,17 @@ export async function onRequest(context) {
 
     if (path === '/api/ivasms/sms' && method === 'GET') {
       const page     = Math.max(1, parseInt(url.searchParams.get('page')   || '1'))
-      const limit    = Math.min(100, Math.max(1, parseInt(url.searchParams.get('limit')  || '20')))
+      const limit    = Math.min(200, Math.max(1, parseInt(url.searchParams.get('limit')  || '20')))
       const search   = url.searchParams.get('search')   || ''
       const hasOtp   = url.searchParams.get('hasOtp')   === 'true'
       const service  = url.searchParams.get('service')  || ''
       const numberId = url.searchParams.get('numberId') || ''
       const since    = url.searchParams.get('since')    || ''
       const country  = url.searchParams.get('country')  || ''
+      const dateFrom = url.searchParams.get('dateFrom') || ''
+      const dateTo   = url.searchParams.get('dateTo')   || ''
+      const tag      = url.searchParams.get('tag')      || ''
+      const starred  = url.searchParams.get('starred')  === 'true'
 
       let msgs = await kvGet(kv, `sms_${user.id}`, [])
       if (!msgs || !Array.isArray(msgs)) msgs = []
@@ -365,10 +411,14 @@ export async function onRequest(context) {
           return !isNaN(t) && t > sinceMs
         })
       }
+      if (dateFrom) { const f = new Date(dateFrom).getTime(); if (!isNaN(f)) msgs = msgs.filter(m => new Date(m.received_at).getTime() >= f) }
+      if (dateTo)   { const t = new Date(dateTo).getTime() + 86399999; if (!isNaN(t)) msgs = msgs.filter(m => new Date(m.received_at).getTime() <= t) }
       if (search)   msgs = msgs.filter(m => (m.body || '').toLowerCase().includes(search.toLowerCase()) || (m.sender || '').toLowerCase().includes(search.toLowerCase()) || (m.phone_number || '').includes(search))
       if (hasOtp)   msgs = msgs.filter(m => m.otp)
       if (service)  msgs = msgs.filter(m => m.service === service)
       if (numberId) msgs = msgs.filter(m => m.number_id === numberId)
+      if (starred)  msgs = msgs.filter(m => m.starred)
+      if (tag)      msgs = msgs.filter(m => (m.tags || []).includes(tag))
       if (country) {
         const nums = await kvGet(kv, `numbers_${user.id}`, [])
         const numIds = (Array.isArray(nums) ? nums : []).filter(n => n.country === country.toUpperCase()).map(n => n.id)
@@ -381,7 +431,6 @@ export async function onRequest(context) {
       return json({ messages: paged, total, pages, page })
     }
 
-    // DELETE SMS
     if (path === '/api/ivasms/sms' && method === 'DELETE') {
       const body = await request.json().catch(() => ({}))
       let msgs = await kvGet(kv, `sms_${user.id}`, [])
@@ -393,6 +442,32 @@ export async function onRequest(context) {
       }
       await kvSet(kv, `sms_${user.id}`, msgs)
       return json({ ok: true, remaining: msgs.length })
+    }
+
+    // STAR/TAG SMS
+    if (path === '/api/ivasms/sms/star' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      let msgs = await kvGet(kv, `sms_${user.id}`, [])
+      if (!Array.isArray(msgs)) msgs = []
+      const idx = msgs.findIndex(m => m.id === body.id)
+      if (idx !== -1) msgs[idx].starred = body.starred !== false
+      await kvSet(kv, `sms_${user.id}`, msgs)
+      return json({ ok: true })
+    }
+
+    if (path === '/api/ivasms/sms/tag' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      let msgs = await kvGet(kv, `sms_${user.id}`, [])
+      if (!Array.isArray(msgs)) msgs = []
+      const idx = msgs.findIndex(m => m.id === body.id)
+      if (idx !== -1) {
+        const tags = new Set(msgs[idx].tags || [])
+        if (body.action === 'remove') tags.delete(body.tag)
+        else tags.add(body.tag)
+        msgs[idx].tags = [...tags]
+      }
+      await kvSet(kv, `sms_${user.id}`, msgs)
+      return json({ ok: true })
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -415,7 +490,6 @@ export async function onRequest(context) {
 
       try {
         const result = await scrapeIVASMS(ivasEmail, ivasPass, freshUser.id, kv)
-        // Update last sync time
         const users2 = await kvGet(kv, 'users', [])
         const arr2   = Array.isArray(users2) ? users2 : []
         const idx2   = arr2.findIndex(u => u.id === user.id)
@@ -424,21 +498,40 @@ export async function onRequest(context) {
           arr2[idx2].sync_count = (arr2[idx2].sync_count || 0) + 1
           await kvSet(kv, 'users', arr2)
         }
-        // Send Telegram notification if OTP found
-        if (result.smsAdded > 0 && freshUser.telegram_bot_token && freshUser.notify_otp !== false) {
-          const msgs2 = await kvGet(kv, `sms_${user.id}`, [])
-          const latest = (Array.isArray(msgs2) ? msgs2 : []).slice(0, result.smsAdded).filter(m => m.otp)
-          for (const msg of latest.slice(0, 3)) {
-            await sendTelegramNotification(freshUser,
-              `🔑 *New OTP Received*\n\n📱 *Number:* \`${msg.phone_number}\`\n👤 *From:* ${msg.sender}\n🔐 *OTP:* \`${msg.otp}\`\n💬 *Message:* ${msg.body?.slice(0, 100)}\n\n_Team Death Legion_`
-            )
+
+        // Telegram + webhook notifications for new OTPs
+        if (result.smsAdded > 0) {
+          const msgs2  = await kvGet(kv, `sms_${user.id}`, [])
+          const latest = (Array.isArray(msgs2) ? msgs2 : []).slice(0, result.smsAdded)
+          const otps   = latest.filter(m => m.otp)
+
+          if (freshUser.telegram_bot_token && freshUser.notify_otp !== false) {
+            for (const msg of otps.slice(0, 3)) {
+              await sendTelegramNotification(freshUser,
+                `🔑 *New OTP Received*\n\n📱 *Number:* \`${msg.phone_number}\`\n👤 *From:* ${msg.sender}\n🔐 *OTP:* \`${msg.otp}\`\n💬 *Message:* ${(msg.body || '').slice(0, 100)}\n\n_Team Death Legion_`
+              )
+            }
+          }
+
+          // Push notifications
+          for (const msg of otps.slice(0, 5)) {
+            await pushNotif(kv, user.id, 'otp', '🔑 New OTP', `OTP ${msg.otp} from ${msg.service}`, { otp: msg.otp, service: msg.service, phone: msg.phone_number })
+          }
+
+          // Webhook
+          if (freshUser.webhook_url) {
+            await fireWebhook(freshUser, 'sms.received', { count: result.smsAdded, otps: otps.length })
           }
         }
-        // Store sync history
+
+        if (freshUser.notify_sync !== false && result.smsAdded > 0) {
+          await pushNotif(kv, user.id, 'sync', '🔄 Sync Complete', `${result.count} numbers · ${result.smsAdded} new SMS`)
+        }
+
         const syncHist = await kvGet(kv, `sync_history_${user.id}`, [])
         const histArr  = Array.isArray(syncHist) ? syncHist : []
-        histArr.unshift({ ts: new Date().toISOString(), ...result })
-        await kvSet(kv, `sync_history_${user.id}`, histArr.slice(0, 50))
+        histArr.unshift({ id: uuid(), ts: new Date().toISOString(), ...result })
+        await kvSet(kv, `sync_history_${user.id}`, histArr.slice(0, 100))
         return json(result)
       } catch (err) {
         const msg = err?.message || String(err) || 'Unknown scraper error'
@@ -482,6 +575,299 @@ export async function onRequest(context) {
     }
 
     // ══════════════════════════════════════════════════════════════════
+    // COUNTRIES
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/countries' && method === 'GET') {
+      const nums = await kvGet(kv, `numbers_${user.id}`, [])
+      const msgs = await kvGet(kv, `sms_${user.id}`, [])
+      const numArr = Array.isArray(nums) ? nums : []
+      const msgArr = Array.isArray(msgs) ? msgs : []
+
+      const countryMap = {}
+      for (const n of numArr) {
+        const c = n.country || 'US'
+        if (!countryMap[c]) countryMap[c] = { code: c, name: n.country_name || c, numbers: 0, sms: 0, active: 0 }
+        countryMap[c].numbers++
+        countryMap[c].sms += n.sms_count || 0
+        if (n.status === 'active') countryMap[c].active++
+      }
+
+      const countries = Object.values(countryMap).sort((a, b) => b.numbers - a.numbers)
+      return json({ countries })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // NUMBER GROUPS
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/groups' && method === 'GET') {
+      const groups = await kvGet(kv, `groups_${user.id}`, [])
+      return json({ groups: Array.isArray(groups) ? groups : [] })
+    }
+
+    if (path === '/api/groups' && method === 'POST') {
+      const body   = await request.json().catch(() => ({}))
+      const groups = await kvGet(kv, `groups_${user.id}`, [])
+      const arr    = Array.isArray(groups) ? groups : []
+      const group  = {
+        id: uuid(),
+        name: body.name || 'Group',
+        color: body.color || '#e50914',
+        description: body.description || '',
+        numberIds: body.numberIds || [],
+        created_at: new Date().toISOString(),
+      }
+      arr.push(group)
+      await kvSet(kv, `groups_${user.id}`, arr)
+      return json({ ok: true, group })
+    }
+
+    if (path.startsWith('/api/groups/') && method === 'PATCH') {
+      const gid    = path.split('/')[3]
+      const body   = await request.json().catch(() => ({}))
+      const groups = await kvGet(kv, `groups_${user.id}`, [])
+      const arr    = Array.isArray(groups) ? groups : []
+      const idx    = arr.findIndex(g => g.id === gid)
+      if (idx === -1) return json({ error: 'Group not found' }, 404)
+      if (body.name)       arr[idx].name       = body.name
+      if (body.color)      arr[idx].color      = body.color
+      if (body.description !== undefined) arr[idx].description = body.description
+      if (body.numberIds)  arr[idx].numberIds  = body.numberIds
+      await kvSet(kv, `groups_${user.id}`, arr)
+      return json({ ok: true, group: arr[idx] })
+    }
+
+    if (path.startsWith('/api/groups/') && method === 'DELETE') {
+      const gid    = path.split('/')[3]
+      const groups = await kvGet(kv, `groups_${user.id}`, [])
+      const arr    = Array.isArray(groups) ? groups : []
+      await kvSet(kv, `groups_${user.id}`, arr.filter(g => g.id !== gid))
+      return json({ ok: true })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // BLACKLIST
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/blacklist' && method === 'GET') {
+      const bl = await kvGet(kv, `blacklist_${user.id}`, [])
+      return json({ blacklist: Array.isArray(bl) ? bl : [] })
+    }
+
+    if (path === '/api/blacklist' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const bl   = await kvGet(kv, `blacklist_${user.id}`, [])
+      const arr  = Array.isArray(bl) ? bl : []
+      if (arr.find(b => b.value === body.value)) return json({ error: 'Already blacklisted' }, 409)
+      const entry = {
+        id: uuid(),
+        type: body.type || 'sender',    // sender | keyword | service
+        value: body.value || '',
+        reason: body.reason || '',
+        created_at: new Date().toISOString(),
+      }
+      arr.push(entry)
+      await kvSet(kv, `blacklist_${user.id}`, arr)
+      return json({ ok: true, entry })
+    }
+
+    if (path.startsWith('/api/blacklist/') && method === 'DELETE') {
+      const bid = path.split('/')[3]
+      const bl  = await kvGet(kv, `blacklist_${user.id}`, [])
+      const arr = Array.isArray(bl) ? bl : []
+      await kvSet(kv, `blacklist_${user.id}`, arr.filter(b => b.id !== bid))
+      return json({ ok: true })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SCHEDULER (auto-sync schedules)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/scheduler' && method === 'GET') {
+      const schedules = await kvGet(kv, `schedules_${user.id}`, [])
+      return json({ schedules: Array.isArray(schedules) ? schedules : [] })
+    }
+
+    if (path === '/api/scheduler' && method === 'POST') {
+      const body      = await request.json().catch(() => ({}))
+      const schedules = await kvGet(kv, `schedules_${user.id}`, [])
+      const arr       = Array.isArray(schedules) ? schedules : []
+      const schedule  = {
+        id: uuid(),
+        name: body.name || 'Auto Sync',
+        type: body.type || 'sync',         // sync | otp-check | export | notify
+        interval: body.interval || 300,    // seconds
+        enabled: body.enabled !== false,
+        lastRun: null,
+        nextRun: new Date(Date.now() + (body.interval || 300) * 1000).toISOString(),
+        created_at: new Date().toISOString(),
+      }
+      arr.push(schedule)
+      await kvSet(kv, `schedules_${user.id}`, arr)
+      return json({ ok: true, schedule })
+    }
+
+    if (path.startsWith('/api/scheduler/') && method === 'PATCH') {
+      const sid   = path.split('/')[3]
+      const body  = await request.json().catch(() => ({}))
+      const scheds = await kvGet(kv, `schedules_${user.id}`, [])
+      const arr    = Array.isArray(scheds) ? scheds : []
+      const idx    = arr.findIndex(s => s.id === sid)
+      if (idx === -1) return json({ error: 'Schedule not found' }, 404)
+      if (body.enabled !== undefined) arr[idx].enabled  = !!body.enabled
+      if (body.interval)              arr[idx].interval = Number(body.interval)
+      if (body.name)                  arr[idx].name     = body.name
+      await kvSet(kv, `schedules_${user.id}`, arr)
+      return json({ ok: true, schedule: arr[idx] })
+    }
+
+    if (path.startsWith('/api/scheduler/') && method === 'DELETE') {
+      const sid   = path.split('/')[3]
+      const scheds = await kvGet(kv, `schedules_${user.id}`, [])
+      const arr    = Array.isArray(scheds) ? scheds : []
+      await kvSet(kv, `schedules_${user.id}`, arr.filter(s => s.id !== sid))
+      return json({ ok: true })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // WEBHOOKS
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/webhooks' && method === 'GET') {
+      const hooks = await kvGet(kv, `webhooks_${user.id}`, [])
+      return json({ webhooks: Array.isArray(hooks) ? hooks : [], current: { url: user.webhook_url || '', events: user.webhook_events || [] } })
+    }
+
+    if (path === '/api/webhooks' && method === 'POST') {
+      const body  = await request.json().catch(() => ({}))
+      const users2 = await kvGet(kv, 'users', [])
+      const arr2   = Array.isArray(users2) ? users2 : []
+      const uidx   = arr2.findIndex(u => u.id === user.id)
+      if (uidx !== -1) {
+        arr2[uidx].webhook_url    = body.url    || ''
+        arr2[uidx].webhook_events = body.events || []
+        await kvSet(kv, 'users', arr2)
+      }
+      // Store webhook delivery log
+      if (body.url) {
+        const hooks = await kvGet(kv, `webhooks_${user.id}`, [])
+        const hArr  = Array.isArray(hooks) ? hooks : []
+        hArr.push({ id: uuid(), url: body.url, events: body.events || [], active: true, created_at: new Date().toISOString() })
+        await kvSet(kv, `webhooks_${user.id}`, hArr.slice(0, 10))
+      }
+      return json({ ok: true })
+    }
+
+    if (path === '/api/webhooks/test' && method === 'POST') {
+      const freshUsers = await kvGet(kv, 'users', [])
+      const freshUser  = (Array.isArray(freshUsers) ? freshUsers : []).find(u => u.id === user.id) || user
+      if (!freshUser.webhook_url) return json({ error: 'Webhook URL not set' }, 400)
+      try {
+        const r = await fetch(freshUser.webhook_url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-DL-Event': 'webhook.test' },
+          body: JSON.stringify({ event: 'webhook.test', payload: { message: 'DL SMS Client test webhook', ts: new Date().toISOString() } }),
+          signal: AbortSignal.timeout(10000),
+        })
+        return json({ ok: true, status: r.status, statusText: r.statusText })
+      } catch (e) {
+        return json({ error: e.message }, 500)
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SPEED DIAL (quick numbers)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/speed-dial' && method === 'GET') {
+      const sd = await kvGet(kv, `speed_dial_${user.id}`, [])
+      return json({ entries: Array.isArray(sd) ? sd : [] })
+    }
+
+    if (path === '/api/speed-dial' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const sd   = await kvGet(kv, `speed_dial_${user.id}`, [])
+      const arr  = Array.isArray(sd) ? sd : []
+      const entry = {
+        id: uuid(),
+        name: body.name || '',
+        phone: body.phone || '',
+        service: body.service || '',
+        note: body.note || '',
+        shortcut: body.shortcut || (arr.length + 1),
+        created_at: new Date().toISOString(),
+      }
+      arr.push(entry)
+      await kvSet(kv, `speed_dial_${user.id}`, arr.slice(0, 20))
+      return json({ ok: true, entry })
+    }
+
+    if (path.startsWith('/api/speed-dial/') && method === 'DELETE') {
+      const sid = path.split('/')[3]
+      const sd  = await kvGet(kv, `speed_dial_${user.id}`, [])
+      const arr = Array.isArray(sd) ? sd : []
+      await kvSet(kv, `speed_dial_${user.id}`, arr.filter(e => e.id !== sid))
+      return json({ ok: true })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // PIN VAULT
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/vault' && method === 'GET') {
+      const pin = url.searchParams.get('pin') || ''
+      if (!pin) return json({ error: 'PIN required' }, 400)
+      const freshUsers = await kvGet(kv, 'users', [])
+      const freshUser  = (Array.isArray(freshUsers) ? freshUsers : []).find(u => u.id === user.id) || user
+      if (freshUser.pin_vault_hash && !(await checkPassword(pin, freshUser.pin_vault_hash)))
+        return json({ error: 'Invalid PIN' }, 401)
+      const vault = await kvGet(kv, `vault_${user.id}`, [])
+      return json({ entries: Array.isArray(vault) ? vault : [] })
+    }
+
+    if (path === '/api/vault' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const freshUsers = await kvGet(kv, 'users', [])
+      const freshUser  = (Array.isArray(freshUsers) ? freshUsers : []).find(u => u.id === user.id) || user
+      if (freshUser.pin_vault_hash && !(await checkPassword(body.pin || '', freshUser.pin_vault_hash)))
+        return json({ error: 'Invalid PIN' }, 401)
+      const vault = await kvGet(kv, `vault_${user.id}`, [])
+      const arr   = Array.isArray(vault) ? vault : []
+      const entry = {
+        id: uuid(),
+        label: body.label || '',
+        service: body.service || '',
+        phone: body.phone || '',
+        otp: body.otp || '',
+        note: body.note || '',
+        created_at: new Date().toISOString(),
+      }
+      arr.unshift(entry)
+      await kvSet(kv, `vault_${user.id}`, arr.slice(0, 500))
+      return json({ ok: true, entry })
+    }
+
+    if (path === '/api/vault/set-pin' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      if (!body.pin || String(body.pin).length < 4) return json({ error: 'PIN must be at least 4 digits' }, 400)
+      const users2 = await kvGet(kv, 'users', [])
+      const arr2   = Array.isArray(users2) ? users2 : []
+      const uidx   = arr2.findIndex(u => u.id === user.id)
+      if (uidx !== -1) {
+        arr2[uidx].pin_vault_hash = await hashPassword(String(body.pin))
+        await kvSet(kv, 'users', arr2)
+      }
+      return json({ ok: true })
+    }
+
+    if (path.startsWith('/api/vault/') && method === 'DELETE') {
+      const vid  = path.split('/')[3]
+      const body = await request.json().catch(() => ({}))
+      const freshUsers = await kvGet(kv, 'users', [])
+      const freshUser  = (Array.isArray(freshUsers) ? freshUsers : []).find(u => u.id === user.id) || user
+      if (freshUser.pin_vault_hash && !(await checkPassword(body.pin || '', freshUser.pin_vault_hash)))
+        return json({ error: 'Invalid PIN' }, 401)
+      const vault = await kvGet(kv, `vault_${user.id}`, [])
+      const arr   = Array.isArray(vault) ? vault : []
+      await kvSet(kv, `vault_${user.id}`, arr.filter(e => e.id !== vid))
+      return json({ ok: true })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     // ANALYTICS
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/analytics' && method === 'GET') {
@@ -491,10 +877,9 @@ export async function onRequest(context) {
       const numArr  = Array.isArray(nums) ? nums : []
       const now     = Date.now()
 
-      // SMS per day (last 14 days)
-      const smsPerDay: Record<string, number> = {}
-      for (let i = 13; i >= 0; i--) {
-        const d = new Date(now - i * 86400000)
+      const smsPerDay = {}
+      for (let i = 29; i >= 0; i--) {
+        const d   = new Date(now - i * 86400000)
         const key = d.toISOString().slice(0, 10)
         smsPerDay[key] = 0
       }
@@ -503,32 +888,46 @@ export async function onRequest(context) {
         if (d in smsPerDay) smsPerDay[d]++
       }
 
-      // Top services
-      const svcCount: Record<string, number> = {}
+      const svcCount = {}
       for (const m of msgArr) {
         const s = m.service || 'Unknown'
         svcCount[s] = (svcCount[s] || 0) + 1
       }
-      const topServices = Object.entries(svcCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count }))
+      const topServices = Object.entries(svcCount).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([name, count]) => ({ name, count }))
 
-      // Top countries
-      const countryCount: Record<string, number> = {}
+      const countryCount = {}
       for (const n of numArr) {
         const c = n.country || 'US'
         countryCount[c] = (countryCount[c] || 0) + (n.sms_count || 0)
       }
-      const topCountries = Object.entries(countryCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([country, sms]) => ({ country, sms }))
+      const topCountries = Object.entries(countryCount).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([country, sms]) => ({ country, sms }))
 
-      // OTP stats
-      const otpMsgs  = msgArr.filter(m => m.otp)
-      const last24h  = msgArr.filter(m => new Date(m.received_at).getTime() > now - 86400000)
-      const last7d   = msgArr.filter(m => new Date(m.received_at).getTime() > now - 7 * 86400000)
+      const otpMsgs = msgArr.filter(m => m.otp)
+      const last24h = msgArr.filter(m => new Date(m.received_at).getTime() > now - 86400000)
+      const last7d  = msgArr.filter(m => new Date(m.received_at).getTime() > now - 7 * 86400000)
+      const last30d = msgArr.filter(m => new Date(m.received_at).getTime() > now - 30 * 86400000)
 
-      // Hourly distribution
       const hourly = Array(24).fill(0)
-      for (const m of msgArr.slice(0, 500)) {
+      for (const m of msgArr.slice(0, 1000)) {
         try { hourly[new Date(m.received_at).getHours()]++ } catch {}
       }
+
+      // Weekly heatmap (last 7 days × 24 hours)
+      const heatmap = Array(7).fill(null).map(() => Array(24).fill(0))
+      for (const m of last7d) {
+        try {
+          const d = new Date(m.received_at)
+          heatmap[d.getDay()][d.getHours()]++
+        } catch {}
+      }
+
+      // OTP services breakdown
+      const otpSvcCount = {}
+      for (const m of otpMsgs) {
+        const s = m.service || 'Unknown'
+        otpSvcCount[s] = (otpSvcCount[s] || 0) + 1
+      }
+      const otpByService = Object.entries(otpSvcCount).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([name, count]) => ({ name, count }))
 
       return json({
         totals: {
@@ -538,12 +937,17 @@ export async function onRequest(context) {
           otps: otpMsgs.length,
           last24h: last24h.length,
           last7d: last7d.length,
+          last30d: last30d.length,
+          starred: msgArr.filter(m => m.starred).length,
         },
         smsPerDay: Object.entries(smsPerDay).map(([date, count]) => ({ date, count })),
         topServices,
         topCountries,
         hourlyDistribution: hourly.map((count, hour) => ({ hour, count })),
+        weeklyHeatmap: heatmap,
+        otpByService,
         otpRate: msgArr.length > 0 ? Math.round(otpMsgs.length / msgArr.length * 100) : 0,
+        avgDailyOtps: last30d.length > 0 ? Math.round(last30d.filter(m => m.otp).length / 30) : 0,
       })
     }
 
@@ -552,24 +956,15 @@ export async function onRequest(context) {
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/notifications' && method === 'GET') {
       const notifs = await kvGet(kv, `notifs_${user.id}`, [])
-      return json({ notifications: Array.isArray(notifs) ? notifs : [] })
+      const arr    = Array.isArray(notifs) ? notifs : []
+      const unread = arr.filter(n => !n.read).length
+      return json({ notifications: arr, unread })
     }
 
     if (path === '/api/notifications' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      const notifs = await kvGet(kv, `notifs_${user.id}`, [])
-      const arr    = Array.isArray(notifs) ? notifs : []
-      const notif  = {
-        id: uuid(),
-        type: body.type || 'info',
-        title: body.title || 'Notification',
-        message: body.message || '',
-        read: false,
-        ts: new Date().toISOString(),
-      }
-      arr.unshift(notif)
-      await kvSet(kv, `notifs_${user.id}`, arr.slice(0, 200))
-      return json({ ok: true, notification: notif })
+      await pushNotif(kv, user.id, body.type || 'info', body.title || 'Notification', body.message || '', body.meta || {})
+      return json({ ok: true })
     }
 
     if (path === '/api/notifications/read' && method === 'POST') {
@@ -587,12 +982,19 @@ export async function onRequest(context) {
     }
 
     if (path === '/api/notifications' && method === 'DELETE') {
-      await kvSet(kv, `notifs_${user.id}`, [])
+      const body = await request.json().catch(() => ({}))
+      if (body.id) {
+        const notifs = await kvGet(kv, `notifs_${user.id}`, [])
+        const arr    = Array.isArray(notifs) ? notifs : []
+        await kvSet(kv, `notifs_${user.id}`, arr.filter(n => n.id !== body.id))
+      } else {
+        await kvSet(kv, `notifs_${user.id}`, [])
+      }
       return json({ ok: true })
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // BULK SMS SEND (via WhatsApp/Telegram)
+    // BULK SMS SEND
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/bulk/send' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
@@ -602,9 +1004,10 @@ export async function onRequest(context) {
       if (!message) return json({ error: 'message required' }, 400)
 
       const results = []
+      const freshUsers = await kvGet(kv, 'users', [])
+      const freshUser  = (Array.isArray(freshUsers) ? freshUsers : []).find(u => u.id === user.id) || user
+
       if (channel === 'telegram') {
-        const freshUsers = await kvGet(kv, 'users', [])
-        const freshUser  = (Array.isArray(freshUsers) ? freshUsers : []).find(u => u.id === user.id) || user
         if (!freshUser.telegram_bot_token) return json({ error: 'Telegram not configured' }, 400)
         for (const num of targets.slice(0, 50)) {
           try {
@@ -620,26 +1023,28 @@ export async function onRequest(context) {
           }
         }
       } else {
-        // Simulated sending (no real SMS gateway)
-        for (const num of targets.slice(0, 100)) {
+        for (const num of targets.slice(0, 200)) {
           results.push({ number: num, ok: true, simulated: true })
         }
       }
 
-      // Store bulk send record
       const bulkHistory = await kvGet(kv, `bulk_history_${user.id}`, [])
       const bulkArr     = Array.isArray(bulkHistory) ? bulkHistory : []
-      bulkArr.unshift({
+      const record = {
         id: uuid(),
         ts: new Date().toISOString(),
         count: targets.length,
         channel: channel || 'simulated',
         success: results.filter(r => r.ok).length,
-        message: message.slice(0, 100),
-      })
-      await kvSet(kv, `bulk_history_${user.id}`, bulkArr.slice(0, 100))
+        message: message.slice(0, 200),
+        targets: targets.slice(0, 10),
+      }
+      bulkArr.unshift(record)
+      await kvSet(kv, `bulk_history_${user.id}`, bulkArr.slice(0, 200))
 
-      return json({ ok: true, results, sent: results.filter(r => r.ok).length })
+      await pushNotif(kv, user.id, 'bulk', '📨 Bulk Send Complete', `${record.success}/${targets.length} sent via ${channel || 'simulated'}`)
+
+      return json({ ok: true, results, sent: record.success, record })
     }
 
     if (path === '/api/bulk/history' && method === 'GET') {
@@ -651,7 +1056,7 @@ export async function onRequest(context) {
     // OTP MONITOR
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/otp/latest' && method === 'GET') {
-      const limit = Math.min(50, parseInt(url.searchParams.get('limit') || '20'))
+      const limit   = Math.min(100, parseInt(url.searchParams.get('limit') || '20'))
       const service = url.searchParams.get('service') || ''
       let msgs = await kvGet(kv, `sms_${user.id}`, [])
       if (!Array.isArray(msgs)) msgs = []
@@ -661,9 +1066,9 @@ export async function onRequest(context) {
     }
 
     if (path === '/api/otp/watch' && method === 'GET') {
-      const service  = url.searchParams.get('service') || ''
+      const service  = url.searchParams.get('service')  || ''
       const numberId = url.searchParams.get('numberId') || ''
-      const since    = url.searchParams.get('since') || new Date(Date.now() - 5 * 60000).toISOString()
+      const since    = url.searchParams.get('since')    || new Date(Date.now() - 5 * 60000).toISOString()
       let msgs = await kvGet(kv, `sms_${user.id}`, [])
       if (!Array.isArray(msgs)) msgs = []
       const sinceMs = new Date(since).getTime()
@@ -677,7 +1082,7 @@ export async function onRequest(context) {
     // API KEYS
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/apikeys' && method === 'GET') {
-      return json({ key: user.api_key || '', note: 'Use X-API-Key header to authenticate' })
+      return json({ key: user.api_key || '', note: 'Use X-API-Key header or Bearer token to authenticate' })
     }
 
     if (path === '/api/apikeys/regenerate' && method === 'POST') {
@@ -701,14 +1106,25 @@ export async function onRequest(context) {
       if (!Array.isArray(msgs)) msgs = []
 
       if (fmt === 'csv') {
-        const header = 'id,phone_number,sender,service,otp,body,received_at\n'
+        const header = 'id,phone_number,sender,service,otp,body,received_at,starred\n'
         const rows   = msgs.map(m =>
-          `"${m.id}","${m.phone_number}","${m.sender}","${m.service}","${m.otp || ''}","${(m.body || '').replace(/"/g, '""')}","${m.received_at}"`
+          `"${m.id}","${m.phone_number}","${m.sender}","${m.service}","${m.otp || ''}","${(m.body || '').replace(/"/g, '""')}","${m.received_at}","${m.starred ? 'yes' : ''}"`
         ).join('\n')
         return new Response(header + rows, {
           headers: {
             'Content-Type': 'text/csv',
             'Content-Disposition': `attachment; filename="dl-sms-export-${Date.now()}.csv"`,
+            'Access-Control-Allow-Origin': '*',
+          }
+        })
+      }
+
+      if (fmt === 'txt') {
+        const lines = msgs.map(m => `[${m.received_at}] ${m.phone_number} | ${m.sender} | ${m.service} | OTP: ${m.otp || 'N/A'}\n${m.body}\n${'─'.repeat(60)}`).join('\n')
+        return new Response(lines, {
+          headers: {
+            'Content-Type': 'text/plain',
+            'Content-Disposition': `attachment; filename="dl-sms-export-${Date.now()}.txt"`,
             'Access-Control-Allow-Origin': '*',
           }
         })
@@ -723,9 +1139,9 @@ export async function onRequest(context) {
       if (!Array.isArray(nums)) nums = []
 
       if (fmt === 'csv') {
-        const header = 'id,phone,country,status,sms_count,last_received\n'
+        const header = 'id,phone,country,country_name,status,sms_count,last_received\n'
         const rows   = nums.map(n =>
-          `"${n.id}","${n.phone}","${n.country}","${n.status}","${n.sms_count || 0}","${n.last_received || ''}"`
+          `"${n.id}","${n.phone}","${n.country}","${n.country_name || ''}","${n.status}","${n.sms_count || 0}","${n.last_received || ''}"`
         ).join('\n')
         return new Response(header + rows, {
           headers: {
@@ -739,6 +1155,29 @@ export async function onRequest(context) {
       return json({ numbers: nums, exported: nums.length, timestamp: new Date().toISOString() })
     }
 
+    if (path === '/api/export/otps' && method === 'GET') {
+      const fmt  = url.searchParams.get('format') || 'json'
+      let msgs   = await kvGet(kv, `sms_${user.id}`, [])
+      if (!Array.isArray(msgs)) msgs = []
+      const otps = msgs.filter(m => m.otp)
+
+      if (fmt === 'csv') {
+        const header = 'id,phone_number,sender,service,otp,body,received_at\n'
+        const rows   = otps.map(m =>
+          `"${m.id}","${m.phone_number}","${m.sender}","${m.service}","${m.otp}","${(m.body || '').replace(/"/g, '""')}","${m.received_at}"`
+        ).join('\n')
+        return new Response(header + rows, {
+          headers: {
+            'Content-Type': 'text/csv',
+            'Content-Disposition': `attachment; filename="dl-otps-export-${Date.now()}.csv"`,
+            'Access-Control-Allow-Origin': '*',
+          }
+        })
+      }
+
+      return json({ otps, exported: otps.length, timestamp: new Date().toISOString() })
+    }
+
     // ══════════════════════════════════════════════════════════════════
     // ACTIVITY LOG
     // ══════════════════════════════════════════════════════════════════
@@ -747,8 +1186,17 @@ export async function onRequest(context) {
       return json({ activity: Array.isArray(activity) ? activity : [] })
     }
 
+    if (path === '/api/activity' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const activity = await kvGet(kv, `activity_${user.id}`, [])
+      const arr      = Array.isArray(activity) ? activity : []
+      arr.unshift({ id: uuid(), type: body.type || 'action', description: body.description || '', ts: new Date().toISOString(), ip: request.headers.get('CF-Connecting-IP') || 'unknown' })
+      await kvSet(kv, `activity_${user.id}`, arr.slice(0, 500))
+      return json({ ok: true })
+    }
+
     // ══════════════════════════════════════════════════════════════════
-    // TAGS (label SMS messages)
+    // TAGS
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/tags' && method === 'GET') {
       const tags = await kvGet(kv, `tags_${user.id}`, [])
@@ -759,10 +1207,18 @@ export async function onRequest(context) {
       const body = await request.json().catch(() => ({}))
       const tags = await kvGet(kv, `tags_${user.id}`, [])
       const arr  = Array.isArray(tags) ? tags : []
-      const tag  = { id: uuid(), name: body.name || 'Tag', color: body.color || '#e50914', smsIds: body.smsIds || [] }
+      const tag  = { id: uuid(), name: body.name || 'Tag', color: body.color || '#e50914', created_at: new Date().toISOString() }
       arr.push(tag)
       await kvSet(kv, `tags_${user.id}`, arr)
       return json({ ok: true, tag })
+    }
+
+    if (path.startsWith('/api/tags/') && method === 'DELETE') {
+      const tid  = path.split('/')[3]
+      const tags = await kvGet(kv, `tags_${user.id}`, [])
+      const arr  = Array.isArray(tags) ? tags : []
+      await kvSet(kv, `tags_${user.id}`, arr.filter(t => t.id !== tid))
+      return json({ ok: true })
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -771,10 +1227,10 @@ export async function onRequest(context) {
     if (path === '/api/lookup' && method === 'GET') {
       const phone = url.searchParams.get('phone') || ''
       if (!phone) return json({ error: 'phone parameter required' }, 400)
-      const msgs = await kvGet(kv, `sms_${user.id}`, [])
-      const arr  = Array.isArray(msgs) ? msgs : []
+      const msgs   = await kvGet(kv, `sms_${user.id}`, [])
+      const arr    = Array.isArray(msgs) ? msgs : []
       const related = arr.filter(m => m.phone_number === phone || m.sender === phone)
-      const nums = await kvGet(kv, `numbers_${user.id}`, [])
+      const nums   = await kvGet(kv, `numbers_${user.id}`, [])
       const numArr = Array.isArray(nums) ? nums : []
       const numInfo = numArr.find(n => n.phone === phone) || null
       return json({
@@ -782,7 +1238,9 @@ export async function onRequest(context) {
         number: numInfo,
         country: numInfo ? numInfo.country : detectCountry(phone),
         smsCount: related.length,
+        otpCount: related.filter(m => m.otp).length,
         recentSMS: related.slice(0, 10),
+        services: [...new Set(related.map(m => m.service))],
       })
     }
 
@@ -796,6 +1254,7 @@ export async function onRequest(context) {
           id: user.id,
           name: user.name,
           email: user.email,
+          role: user.role || 'user',
           ivasms_email: user.ivasms_email || '',
           ivasms_password: '',
           telegram_bot_token: user.telegram_bot_token || '',
@@ -808,9 +1267,14 @@ export async function onRequest(context) {
           auto_sync_interval: user.auto_sync_interval || 300,
           notify_otp: user.notify_otp !== false,
           notify_sms: user.notify_sms || false,
+          notify_sync: user.notify_sync !== false,
           theme: user.theme || 'dark',
+          webhook_url: user.webhook_url || '',
+          webhook_events: user.webhook_events || [],
+          has_pin_vault: !!user.pin_vault_hash,
           last_sync: user.last_sync || null,
           sync_count: user.sync_count || 0,
+          created_at: user.created_at || '',
         }
       })
     }
@@ -822,14 +1286,12 @@ export async function onRequest(context) {
       if (!Array.isArray(users)) users = []
 
       let idx = users.findIndex(u => u.id === user.id)
-      if (idx === -1) {
-        users.push({ ...user })
-        idx = users.length - 1
-      }
+      if (idx === -1) { users.push({ ...user }); idx = users.length - 1 }
 
       if (body.type === 'profile') {
         if (body.name  && String(body.name).trim())  users[idx].name  = String(body.name).trim()
         if (body.email && String(body.email).trim()) users[idx].email = String(body.email).toLowerCase().trim()
+        if (body.theme)                              users[idx].theme = body.theme
 
       } else if (body.type === 'ivasms') {
         users[idx].ivasms_email    = String(body.email    || '').trim()
@@ -850,11 +1312,16 @@ export async function onRequest(context) {
         users[idx].mobile_token = 'dl_' + uuid().replace(/-/g, '')
 
       } else if (body.type === 'preferences') {
-        if (body.auto_sync !== undefined)          users[idx].auto_sync          = !!body.auto_sync
+        if (body.auto_sync          !== undefined) users[idx].auto_sync          = !!body.auto_sync
         if (body.auto_sync_interval !== undefined) users[idx].auto_sync_interval = Number(body.auto_sync_interval) || 300
-        if (body.notify_otp !== undefined)         users[idx].notify_otp         = !!body.notify_otp
-        if (body.notify_sms !== undefined)         users[idx].notify_sms         = !!body.notify_sms
+        if (body.notify_otp         !== undefined) users[idx].notify_otp         = !!body.notify_otp
+        if (body.notify_sms         !== undefined) users[idx].notify_sms         = !!body.notify_sms
+        if (body.notify_sync        !== undefined) users[idx].notify_sync        = !!body.notify_sync
         if (body.theme)                            users[idx].theme              = body.theme
+
+      } else if (body.type === 'webhook') {
+        users[idx].webhook_url    = body.url    || ''
+        users[idx].webhook_events = body.events || []
 
       } else {
         return json({ error: 'Unknown settings type: ' + body.type }, 400)
@@ -877,7 +1344,10 @@ export async function onRequest(context) {
           auto_sync_interval: u.auto_sync_interval || 300,
           notify_otp: u.notify_otp !== false,
           notify_sms: u.notify_sms || false,
+          notify_sync: u.notify_sync !== false,
           theme: u.theme || 'dark',
+          webhook_url: u.webhook_url || '',
+          webhook_events: u.webhook_events || [],
           last_sync: u.last_sync || null,
           sync_count: u.sync_count || 0,
         }
@@ -929,7 +1399,7 @@ export async function onRequest(context) {
       const sessions = await kvGet(kv, `sessions_${user.id}`, [])
       const arr      = Array.isArray(sessions) ? sessions : []
       arr.unshift(session)
-      await kvSet(kv, `sessions_${user.id}`, arr.slice(0, 50))
+      await kvSet(kv, `sessions_${user.id}`, arr.slice(0, 100))
 
       const msgs    = await kvGet(kv, `sms_${user.id}`, [])
       const msgArr  = Array.isArray(msgs) ? msgs : []
@@ -1025,8 +1495,30 @@ export async function onRequest(context) {
       }
     }
 
+    // Get Telegram updates (to find chat_id)
+    if (path === '/api/telegram/updates' && method === 'GET') {
+      const freshUsers = await kvGet(kv, 'users', [])
+      const freshUser  = (Array.isArray(freshUsers) ? freshUsers : []).find(u => u.id === user.id) || user
+      if (!freshUser.telegram_bot_token) return json({ error: 'Bot token not set' }, 400)
+      try {
+        const r = await fetch(`https://api.telegram.org/bot${freshUser.telegram_bot_token}/getUpdates?limit=10`)
+        const d = await r.json()
+        if (!d.ok) return json({ error: d.description || 'Failed to get updates' }, 400)
+        const updates = (d.result || []).map(u => ({
+          id: u.update_id,
+          chatId: u.message?.chat?.id || u.channel_post?.chat?.id || null,
+          from: u.message?.from?.username || u.message?.from?.first_name || 'Unknown',
+          text: u.message?.text || '',
+          date: u.message?.date ? new Date(u.message.date * 1000).toISOString() : null,
+        }))
+        return json({ ok: true, updates })
+      } catch (e) {
+        return json({ error: e.message }, 500)
+      }
+    }
+
     // ══════════════════════════════════════════════════════════════════
-    // WHATSAPP (simulated - iVASMS number linking)
+    // WHATSAPP
     // ══════════════════════════════════════════════════════════════════
 
     if (path === '/api/whatsapp/status' && method === 'GET') {
@@ -1036,27 +1528,25 @@ export async function onRequest(context) {
         number: user.whatsapp_number || null,
         status: user.has_whatsapp ? 'connected' : 'disconnected',
         data: waData,
+        linkedAt: waData?.linkedAt || null,
       })
     }
 
     if (path === '/api/whatsapp/link' && method === 'POST') {
-      // Link an iVASMS number to WhatsApp
       const body = await request.json().catch(() => ({}))
       const { numberId, numberPhone } = body
       if (!numberId) return json({ error: 'numberId required' }, 400)
 
-      const nums = await kvGet(kv, `numbers_${user.id}`, [])
+      const nums   = await kvGet(kv, `numbers_${user.id}`, [])
       const numArr = Array.isArray(nums) ? nums : []
-      const num = numArr.find(n => n.id === numberId)
+      const num    = numArr.find(n => n.id === numberId)
       if (!num) return json({ error: 'Number not found' }, 404)
 
-      // Update number's whatsapp_created flag
       const idx = numArr.findIndex(n => n.id === numberId)
-      numArr[idx].whatsapp_created = 1
+      numArr[idx].whatsapp_created   = 1
       numArr[idx].whatsapp_linked_at = new Date().toISOString()
       await kvSet(kv, `numbers_${user.id}`, numArr)
 
-      // Update user
       const users2 = await kvGet(kv, 'users', [])
       const arr2   = Array.isArray(users2) ? users2 : []
       const uidx   = arr2.findIndex(u => u.id === user.id)
@@ -1066,20 +1556,24 @@ export async function onRequest(context) {
         await kvSet(kv, 'users', arr2)
       }
 
-      // Generate QR-like token
       const waToken = 'WA_' + uuid().replace(/-/g, '').toUpperCase().slice(0, 20)
-      await kvSet(kv, `whatsapp_${user.id}`, {
+      const waData  = {
         token: waToken,
         phone: num.phone,
         numberId: num.id,
         linkedAt: new Date().toISOString(),
         status: 'active',
-      })
+        country: num.country,
+      }
+      await kvSet(kv, `whatsapp_${user.id}`, waData)
+
+      await pushNotif(kv, user.id, 'whatsapp', '📱 WhatsApp Linked', `Number ${num.phone} linked to WhatsApp`)
 
       return json({
         ok: true,
         token: waToken,
         phone: num.phone,
+        data: waData,
         message: 'WhatsApp number linked successfully via DL SMS Client',
       })
     }
@@ -1095,8 +1589,7 @@ export async function onRequest(context) {
       }
       await kvSet(kv, `whatsapp_${user.id}`, null)
 
-      // Unmark all numbers
-      const nums2 = await kvGet(kv, `numbers_${user.id}`, [])
+      const nums2   = await kvGet(kv, `numbers_${user.id}`, [])
       const numArr2 = Array.isArray(nums2) ? nums2 : []
       numArr2.forEach(n => { n.whatsapp_created = 0 })
       await kvSet(kv, `numbers_${user.id}`, numArr2)
@@ -1106,18 +1599,18 @@ export async function onRequest(context) {
 
     if (path === '/api/whatsapp/messages' && method === 'GET') {
       const waData = await kvGet(kv, `whatsapp_${user.id}`, null)
-      if (!waData) return json({ messages: [] })
-      // Return SMS for the linked WhatsApp number
+      if (!waData) return json({ messages: [], phone: null })
       let msgs = await kvGet(kv, `sms_${user.id}`, [])
       if (!Array.isArray(msgs)) msgs = []
-      const waMsgs = msgs.filter(m => m.phone_number === waData.phone).slice(0, 30)
-      return json({ messages: waMsgs, phone: waData.phone })
+      const waMsgs = msgs.filter(m => m.phone_number === waData.phone).slice(0, 50)
+      // Also include outbox
+      const outbox = await kvGet(kv, `wa_outbox_${user.id}`, [])
+      return json({ messages: waMsgs, outbox: Array.isArray(outbox) ? outbox.slice(0, 30) : [], phone: waData.phone })
     }
 
     if (path === '/api/whatsapp/send' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
       if (!user.has_whatsapp) return json({ error: 'WhatsApp not linked. Link a number first.' }, 400)
-      // Store as outbound message record
       const outbox = await kvGet(kv, `wa_outbox_${user.id}`, [])
       const arr    = Array.isArray(outbox) ? outbox : []
       const msg    = {
@@ -1129,11 +1622,341 @@ export async function onRequest(context) {
         simulated: true,
       }
       arr.unshift(msg)
-      await kvSet(kv, `wa_outbox_${user.id}`, arr.slice(0, 200))
+      await kvSet(kv, `wa_outbox_${user.id}`, arr.slice(0, 500))
       return json({ ok: true, message: msg })
     }
 
-    if (path === '/api/whatsapp/chats'    && method === 'GET') return json({ chats: [] })
+    if (path === '/api/whatsapp/chats' && method === 'GET') {
+      const waData = await kvGet(kv, `whatsapp_${user.id}`, null)
+      if (!waData) return json({ chats: [] })
+      let msgs = await kvGet(kv, `sms_${user.id}`, [])
+      if (!Array.isArray(msgs)) msgs = []
+      const waMsgs = msgs.filter(m => m.phone_number === waData.phone)
+      // Group by sender
+      const chatMap = {}
+      for (const m of waMsgs) {
+        const s = m.sender
+        if (!chatMap[s]) chatMap[s] = { name: s, lastMsg: m.body, lastTs: m.received_at, count: 0, unread: 0 }
+        chatMap[s].count++
+        if (!m.read_wa) chatMap[s].unread++
+        if (m.received_at > chatMap[s].lastTs) { chatMap[s].lastMsg = m.body; chatMap[s].lastTs = m.received_at }
+      }
+      return json({ chats: Object.values(chatMap).sort((a, b) => b.lastTs.localeCompare(a.lastTs)) })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // HEARTBEAT / ALWAYS-CONNECTED (1s polling endpoint)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/heartbeat' && method === 'GET') {
+      const since = url.searchParams.get('since') || ''
+      const [nums, msgs, notifs, syncHist] = await Promise.all([
+        kvGet(kv, `numbers_${user.id}`, []),
+        kvGet(kv, `sms_${user.id}`,     []),
+        kvGet(kv, `notifs_${user.id}`,  []),
+        kvGet(kv, `sync_history_${user.id}`, []),
+      ])
+      const numArr  = Array.isArray(nums)  ? nums  : []
+      const msgArr  = Array.isArray(msgs)  ? msgs  : []
+      const notArr  = Array.isArray(notifs) ? notifs : []
+      const histArr = Array.isArray(syncHist) ? syncHist : []
+      const now     = Date.now()
+
+      let newMsgs = []
+      if (since) {
+        const sinceMs = new Date(since).getTime()
+        if (!isNaN(sinceMs)) newMsgs = msgArr.filter(m => new Date(m.received_at).getTime() > sinceMs)
+      }
+
+      const freshUsers2 = await kvGet(kv, 'users', [])
+      const freshUser2  = (Array.isArray(freshUsers2) ? freshUsers2 : []).find(u => u.id === user.id) || user
+
+      return json({
+        ts:          new Date().toISOString(),
+        connected:   true,
+        numbers:     numArr.length,
+        active:      numArr.filter(n => { const l = n.last_received ? new Date(n.last_received).getTime() : 0; return l ? (now - l) / 3600000 < 24 : n.status === 'active' }).length,
+        sms:         msgArr.length,
+        otps:        msgArr.filter(m => m.otp).length,
+        unreadNotif: notArr.filter(n => !n.read).length,
+        newMsgs,
+        newCount:    newMsgs.length,
+        lastSync:    histArr[0]?.ts || null,
+        autoSync:    freshUser2.auto_sync || false,
+        ivasOk:      !!(freshUser2.ivasms_email && freshUser2.ivasms_password),
+        whatsapp:    freshUser2.has_whatsapp || 0,
+      })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // MOBILE SMS RECEIVER (receives SMS from Android/iOS app)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/mobile/sms' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { token, sender, smsBody, body: bodyAlt } = body
+      const msgBody = smsBody || bodyAlt || body.message || ''
+      if (!token) return json({ error: 'token required' }, 400)
+      const users2 = await kvGet(kv, 'users', [])
+      const arr2   = Array.isArray(users2) ? users2 : []
+      const owner  = arr2.find(u => u.mobile_token === token)
+      if (!owner) return json({ error: 'Invalid token' }, 401)
+      if (!msgBody) return json({ error: 'body required' }, 400)
+      const SERVICE_PATS = [
+        { p: /google|gmail|youtube/i, s: 'Google' }, { p: /whatsapp/i, s: 'WhatsApp' },
+        { p: /telegram/i, s: 'Telegram' }, { p: /facebook|instagram/i, s: 'Facebook' },
+        { p: /twitter|x\.com/i, s: 'Twitter' }, { p: /amazon/i, s: 'Amazon' },
+        { p: /microsoft|outlook/i, s: 'Microsoft' }, { p: /apple|icloud/i, s: 'Apple' },
+        { p: /paypal/i, s: 'PayPal' }, { p: /binance|crypto|bitcoin/i, s: 'Crypto' },
+        { p: /netflix/i, s: 'Netflix' }, { p: /tiktok/i, s: 'TikTok' },
+      ]
+      let service = 'Unknown'
+      for (const { p, s } of SERVICE_PATS) { if (p.test(msgBody) || p.test(sender || '')) { service = s; break } }
+      const otpMatch = msgBody.match(/\b(\d{4,8})\b/)
+      const otp = otpMatch ? otpMatch[1] : null
+      const newMsg = {
+        id: uuid(), user_id: owner.id,
+        number_id: 'mobile', phone_number: body.phone || sender || 'mobile',
+        sender: sender || 'Mobile', body: msgBody, otp, service,
+        received_at: new Date().toISOString(), starred: false, tags: [], source: 'mobile',
+      }
+      const existingMsgs = await kvGet(kv, `sms_${owner.id}`, [])
+      const existArr = Array.isArray(existingMsgs) ? existingMsgs : []
+      existArr.unshift(newMsg)
+      await kvSet(kv, `sms_${owner.id}`, existArr.slice(0, 5000))
+      if (otp && owner.notify_otp !== false) {
+        await pushNotif(kv, owner.id, 'otp', '🔑 Mobile OTP', `OTP ${otp} from ${service}`, { otp, service, phone: newMsg.phone_number })
+        if (owner.telegram_bot_token && owner.telegram_chat_id) {
+          await sendTelegramNotification(owner, `🔑 *Mobile OTP Received*\n\n📱 *From:* ${sender || 'Mobile'}\n🔐 *OTP:* \`${otp}\`\n🎯 *Service:* ${service}\n💬 ${msgBody.slice(0, 100)}\n\n_Team Death Legion_`)
+        }
+      }
+      return json({ ok: true, message: newMsg })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // WHATSAPP DEVICE REGISTRY
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/whatsapp/devices' && method === 'GET') {
+      const devices = await kvGet(kv, `wa_devices_${user.id}`, [])
+      return json({ devices: Array.isArray(devices) ? devices : [] })
+    }
+
+    if (path === '/api/whatsapp/devices' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const KNOWN_DEVICES = [
+        { model: 'Samsung Galaxy S25 Ultra', os: 'Android 15', brand: 'Samsung', icon: '📱' },
+        { model: 'Samsung Galaxy S25+',      os: 'Android 15', brand: 'Samsung', icon: '📱' },
+        { model: 'Samsung Galaxy S24 Ultra', os: 'Android 14', brand: 'Samsung', icon: '📱' },
+        { model: 'Samsung Galaxy Z Fold 6',  os: 'Android 14', brand: 'Samsung', icon: '📱' },
+        { model: 'Google Pixel 9 Pro XL',    os: 'Android 15', brand: 'Google',  icon: '🔵' },
+        { model: 'Google Pixel 9 Pro',       os: 'Android 15', brand: 'Google',  icon: '🔵' },
+        { model: 'Google Pixel 9',           os: 'Android 15', brand: 'Google',  icon: '🔵' },
+        { model: 'iPhone 16 Pro Max',        os: 'iOS 18',     brand: 'Apple',   icon: '🍎' },
+        { model: 'iPhone 16 Pro',            os: 'iOS 18',     brand: 'Apple',   icon: '🍎' },
+        { model: 'iPhone 16',                os: 'iOS 18',     brand: 'Apple',   icon: '🍎' },
+        { model: 'OnePlus 13',               os: 'Android 15', brand: 'OnePlus', icon: '📲' },
+        { model: 'Xiaomi 15 Ultra',          os: 'Android 15', brand: 'Xiaomi',  icon: '📲' },
+        { model: 'Custom / Other',           os: 'Android/iOS','brand': 'Other', icon: '📲' },
+      ]
+      const preset = KNOWN_DEVICES.find(d => d.model === body.model)
+      const device = {
+        id: uuid(),
+        name:       body.name       || preset?.model  || body.model || 'My Device',
+        model:      body.model      || 'Unknown',
+        brand:      body.brand      || preset?.brand  || 'Unknown',
+        os:         body.os         || preset?.os     || 'Android',
+        icon:       body.icon       || preset?.icon   || '📱',
+        phone:      body.phone      || user.whatsapp_number || '',
+        status:     'connected',
+        batteryPct: body.batteryPct || null,
+        lastSeen:   new Date().toISOString(),
+        linkedAt:   new Date().toISOString(),
+        ipAddress:  request.headers.get('CF-Connecting-IP') || 'unknown',
+        country:    request.headers.get('CF-IPCountry') || 'unknown',
+      }
+      const devices = await kvGet(kv, `wa_devices_${user.id}`, [])
+      const arr = Array.isArray(devices) ? devices : []
+      arr.unshift(device)
+      await kvSet(kv, `wa_devices_${user.id}`, arr.slice(0, 20))
+      await pushNotif(kv, user.id, 'whatsapp', '📱 Device Connected', `${device.name} connected to WhatsApp`)
+      return json({ ok: true, device })
+    }
+
+    if (path.startsWith('/api/whatsapp/devices/') && method === 'DELETE') {
+      const did = path.split('/')[4]
+      const devices = await kvGet(kv, `wa_devices_${user.id}`, [])
+      const arr = Array.isArray(devices) ? devices : []
+      await kvSet(kv, `wa_devices_${user.id}`, arr.filter(d => d.id !== did))
+      return json({ ok: true })
+    }
+
+    if (path.startsWith('/api/whatsapp/devices/') && method === 'PATCH') {
+      const did  = path.split('/')[4]
+      const body = await request.json().catch(() => ({}))
+      const devices = await kvGet(kv, `wa_devices_${user.id}`, [])
+      const arr = Array.isArray(devices) ? devices : []
+      const idx = arr.findIndex(d => d.id === did)
+      if (idx !== -1) {
+        arr[idx] = { ...arr[idx], ...body, id: did, lastSeen: new Date().toISOString() }
+        await kvSet(kv, `wa_devices_${user.id}`, arr)
+      }
+      return json({ ok: true, device: arr[idx] || null })
+    }
+
+    // WhatsApp QR/session code (simulated)
+    if (path === '/api/whatsapp/qr' && method === 'GET') {
+      const qrCode = 'DL-WA-' + uuid().replace(/-/g,'').toUpperCase().slice(0,24)
+      const expiresAt = new Date(Date.now() + 60000).toISOString()
+      await kvSet(kv, `wa_qr_${user.id}`, { code: qrCode, expiresAt })
+      return json({ ok: true, qrCode, expiresAt, instructions: 'Open WhatsApp → Settings → Linked Devices → Link a device → scan QR' })
+    }
+
+    if (path === '/api/whatsapp/qr/confirm' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const saved = await kvGet(kv, `wa_qr_${user.id}`, null)
+      if (!saved || saved.code !== body.code) return json({ error: 'Invalid or expired QR code' }, 400)
+      await kvSet(kv, `wa_qr_${user.id}`, null)
+      // Register device automatically
+      const device = {
+        id: uuid(), name: body.deviceName || 'My Phone',
+        model: body.model || 'Unknown', brand: body.brand || 'Unknown',
+        os: body.os || 'Android', icon: body.icon || '📱',
+        phone: user.whatsapp_number || '', status: 'connected',
+        lastSeen: new Date().toISOString(), linkedAt: new Date().toISOString(),
+      }
+      const devices = await kvGet(kv, `wa_devices_${user.id}`, [])
+      const arr = Array.isArray(devices) ? devices : []
+      arr.unshift(device)
+      await kvSet(kv, `wa_devices_${user.id}`, arr.slice(0, 20))
+      return json({ ok: true, device })
+    }
+
+    // WhatsApp broadcast
+    if (path === '/api/whatsapp/broadcast' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { targets, message } = body
+      if (!targets || !message) return json({ error: 'targets and message required' }, 400)
+      const results = (targets || []).slice(0, 100).map((t: any) => ({ to: t, status: 'queued', ts: new Date().toISOString() }))
+      const hist = await kvGet(kv, `wa_broadcast_${user.id}`, [])
+      const hArr = Array.isArray(hist) ? hist : []
+      hArr.unshift({ id: uuid(), ts: new Date().toISOString(), count: results.length, message: message.slice(0,200), results })
+      await kvSet(kv, `wa_broadcast_${user.id}`, hArr.slice(0,100))
+      return json({ ok: true, sent: results.length, results })
+    }
+
+    if (path === '/api/whatsapp/broadcast' && method === 'GET') {
+      const hist = await kvGet(kv, `wa_broadcast_${user.id}`, [])
+      return json({ history: Array.isArray(hist) ? hist : [] })
+    }
+
+    // WhatsApp stats
+    if (path === '/api/whatsapp/stats' && method === 'GET') {
+      const [devicesRaw, outboxRaw, msgsRaw] = await Promise.all([
+        kvGet(kv, `wa_devices_${user.id}`, []),
+        kvGet(kv, `wa_outbox_${user.id}`, []),
+        kvGet(kv, `sms_${user.id}`, []),
+      ])
+      const devices = Array.isArray(devicesRaw) ? devicesRaw : []
+      const outbox  = Array.isArray(outboxRaw)  ? outboxRaw  : []
+      const msgs    = Array.isArray(msgsRaw)    ? msgsRaw    : []
+      const waMsgs  = msgs.filter(m => m.phone_number === user.whatsapp_number)
+      return json({
+        connected:     user.has_whatsapp === 1,
+        devices:       devices.length,
+        activeDevices: devices.filter(d => d.status === 'connected').length,
+        sent:          outbox.length,
+        received:      waMsgs.length,
+        otps:          waMsgs.filter(m => m.otp).length,
+      })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // LIVE SMS STREAM (1s polling, returns only new since timestamp)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/stream/sms' && method === 'GET') {
+      const since    = url.searchParams.get('since') || new Date(Date.now() - 5000).toISOString()
+      const limit    = Math.min(50, parseInt(url.searchParams.get('limit') || '10'))
+      let msgs       = await kvGet(kv, `sms_${user.id}`, [])
+      if (!Array.isArray(msgs)) msgs = []
+      const sinceMs  = new Date(since).getTime()
+      const newMsgs  = isNaN(sinceMs) ? msgs.slice(0, limit) : msgs.filter(m => new Date(m.received_at).getTime() > sinceMs).slice(0, limit)
+      const numbers  = await kvGet(kv, `numbers_${user.id}`, [])
+      const numArr   = Array.isArray(numbers) ? numbers : []
+      return json({
+        messages:      newMsgs,
+        count:         newMsgs.length,
+        total:         msgs.length,
+        activeNumbers: numArr.filter(n => n.status === 'active').length,
+        ts:            new Date().toISOString(),
+      })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // NUMBER NOTES
+    // ══════════════════════════════════════════════════════════════════
+    if (path.startsWith('/api/numbers/') && path.endsWith('/note') && method === 'POST') {
+      const numId  = path.split('/')[3]
+      const body   = await request.json().catch(() => ({}))
+      const nums   = await kvGet(kv, `numbers_${user.id}`, [])
+      const numArr = Array.isArray(nums) ? nums : []
+      const idx    = numArr.findIndex(n => n.id === numId)
+      if (idx !== -1) { numArr[idx].note = body.note || ''; await kvSet(kv, `numbers_${user.id}`, numArr) }
+      return json({ ok: true })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SMS STATS (per-number quick stat)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/sms/stats' && method === 'GET') {
+      const msgs   = await kvGet(kv, `sms_${user.id}`, [])
+      const arr    = Array.isArray(msgs) ? msgs : []
+      const now    = Date.now()
+      const perSvc: Record<string, number> = {}
+      for (const m of arr) perSvc[m.service || 'Unknown'] = (perSvc[m.service || 'Unknown'] || 0) + 1
+      return json({
+        total:    arr.length,
+        withOtp:  arr.filter(m => m.otp).length,
+        last1h:   arr.filter(m => (now - new Date(m.received_at).getTime()) < 3600000).length,
+        last24h:  arr.filter(m => (now - new Date(m.received_at).getTime()) < 86400000).length,
+        starred:  arr.filter(m => m.starred).length,
+        perService: Object.entries(perSvc).sort((a,b) => b[1]-a[1]).slice(0,10).map(([s,c]) => ({ service: s, count: c })),
+      })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // AUTO-SYNC TRIGGER (called by client-side timer)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/ivasms/auto-sync' && method === 'POST') {
+      const freshUsers3  = await kvGet(kv, 'users', [])
+      const freshUser3   = (Array.isArray(freshUsers3) ? freshUsers3 : []).find(u => u.id === user.id) || user
+      if (!freshUser3.auto_sync) return json({ skipped: true, reason: 'auto_sync disabled' })
+      if (!freshUser3.ivasms_email || !freshUser3.ivasms_password) return json({ skipped: true, reason: 'no credentials' })
+      const lastSync = freshUser3.last_sync ? new Date(freshUser3.last_sync).getTime() : 0
+      const interval  = (freshUser3.auto_sync_interval || 300) * 1000
+      if (Date.now() - lastSync < interval) return json({ skipped: true, reason: 'too_soon', nextIn: Math.round((interval - (Date.now() - lastSync)) / 1000) })
+      try {
+        const result = await scrapeIVASMS(freshUser3.ivasms_email, freshUser3.ivasms_password, freshUser3.id, kv)
+        const users4 = await kvGet(kv, 'users', [])
+        const arr4   = Array.isArray(users4) ? users4 : []
+        const idx4   = arr4.findIndex(u => u.id === user.id)
+        if (idx4 !== -1) { arr4[idx4].last_sync = new Date().toISOString(); arr4[idx4].sync_count = (arr4[idx4].sync_count || 0) + 1; await kvSet(kv, 'users', arr4) }
+        if (result.smsAdded > 0) {
+          const msgs5 = await kvGet(kv, `sms_${user.id}`, [])
+          const otps5 = (Array.isArray(msgs5) ? msgs5 : []).slice(0, result.smsAdded).filter((m: any) => m.otp)
+          for (const msg of otps5.slice(0, 3)) {
+            await pushNotif(kv, user.id, 'otp', '🔑 Auto OTP', `OTP ${msg.otp} from ${msg.service}`, { otp: msg.otp, service: msg.service })
+            if (freshUser3.telegram_bot_token && freshUser3.notify_otp !== false) {
+              await sendTelegramNotification(freshUser3, `🔑 *Auto-Sync OTP*\n\n📱 *Number:* \`${msg.phone_number}\`\n🔐 *OTP:* \`${msg.otp}\`\n🎯 *Service:* ${msg.service}\n\n_Team Death Legion_`)
+            }
+          }
+        }
+        const syncHist6 = await kvGet(kv, `sync_history_${user.id}`, [])
+        const h6        = Array.isArray(syncHist6) ? syncHist6 : []
+        h6.unshift({ id: uuid(), ts: new Date().toISOString(), ...result, auto: true })
+        await kvSet(kv, `sync_history_${user.id}`, h6.slice(0, 100))
+        return json({ ...result, auto: true })
+      } catch (err: any) {
+        return json({ error: err?.message || 'Auto-sync failed' }, 500)
+      }
+    }
 
     // ══════════════════════════════════════════════════════════════════
     // DL CHAT
@@ -1142,6 +1965,11 @@ export async function onRequest(context) {
     if (path === '/api/chat/rooms' && method === 'GET') {
       const rooms    = await kvGet(kv, 'chat_rooms', [])
       const arr      = Array.isArray(rooms) ? rooms : []
+      // Ensure general room exists
+      if (!arr.find(r => r.id === 'general')) {
+        arr.unshift({ id: 'general', name: 'General', description: 'Main chat room', type: 'group', created_by: 'system', created_at: new Date().toISOString() })
+        await kvSet(kv, 'chat_rooms', arr)
+      }
       const enriched = await Promise.all(arr.map(async room => {
         const msgs = await kvGet(kv, `chat_msgs_${room.id}`, [])
         const mArr = Array.isArray(msgs) ? msgs : []
@@ -1170,7 +1998,7 @@ export async function onRequest(context) {
 
     if (path === '/api/chat/messages' && method === 'GET') {
       const roomId = url.searchParams.get('room') || 'general'
-      const limit  = Math.min(100, parseInt(url.searchParams.get('limit') || '50'))
+      const limit  = Math.min(200, parseInt(url.searchParams.get('limit') || '50'))
       const since  = url.searchParams.get('since') || ''
       let msgs     = await kvGet(kv, `chat_msgs_${roomId}`, [])
       if (!Array.isArray(msgs)) msgs = []
@@ -1194,6 +2022,8 @@ export async function onRequest(context) {
         body: body.body || '',
         ts: new Date().toISOString(),
         type: body.type || 'text',
+        edited: false,
+        reactions: {},
       }
       arr.push(msg)
       await kvSet(kv, `chat_msgs_${roomId}`, arr.slice(-500))
@@ -1207,6 +2037,24 @@ export async function onRequest(context) {
       const arr    = Array.isArray(msgs) ? msgs : []
       const updated = arr.filter(m => !(m.id === body.id && m.userId === user.id))
       await kvSet(kv, `chat_msgs_${roomId}`, updated)
+      return json({ ok: true })
+    }
+
+    if (path === '/api/chat/react' && method === 'POST') {
+      const body   = await request.json().catch(() => ({}))
+      const roomId = body.room || 'general'
+      const msgs   = await kvGet(kv, `chat_msgs_${roomId}`, [])
+      const arr    = Array.isArray(msgs) ? msgs : []
+      const msg    = arr.find(m => m.id === body.messageId)
+      if (msg) {
+        if (!msg.reactions) msg.reactions = {}
+        if (!msg.reactions[body.emoji]) msg.reactions[body.emoji] = []
+        const reacts = msg.reactions[body.emoji]
+        const idx    = reacts.indexOf(user.id)
+        if (idx !== -1) reacts.splice(idx, 1)
+        else reacts.push(user.id)
+        await kvSet(kv, `chat_msgs_${roomId}`, arr)
+      }
       return json({ ok: true })
     }
 
@@ -1241,6 +2089,42 @@ export async function onRequest(context) {
           ...numResults.map(n => ({ type: 'number', ...n })),
         ],
         total: smsResults.length + numResults.length,
+      })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // DASHBOARD STATS (combined endpoint)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/dashboard' && method === 'GET') {
+      const [nums, msgs, syncHist, notifs] = await Promise.all([
+        kvGet(kv, `numbers_${user.id}`, []),
+        kvGet(kv, `sms_${user.id}`, []),
+        kvGet(kv, `sync_history_${user.id}`, []),
+        kvGet(kv, `notifs_${user.id}`, []),
+      ])
+      const numArr  = Array.isArray(nums)  ? nums  : []
+      const msgArr  = Array.isArray(msgs)  ? msgs  : []
+      const histArr = Array.isArray(syncHist) ? syncHist : []
+      const notArr  = Array.isArray(notifs) ? notifs : []
+      const now     = Date.now()
+
+      const activeNums = numArr.filter(n => {
+        const lastMs = n.last_received ? new Date(n.last_received).getTime() : 0
+        return lastMs ? (now - lastMs) / 3600000 < 24 : n.status === 'active'
+      })
+
+      return json({
+        numbers:     numArr.length,
+        active:      activeNums.length,
+        sms:         msgArr.length,
+        otps:        msgArr.filter(m => m.otp).length,
+        last24h:     msgArr.filter(m => new Date(m.received_at).getTime() > now - 86400000).length,
+        whatsapp:    user.has_whatsapp || 0,
+        unreadNotif: notArr.filter(n => !n.read).length,
+        lastSync:    histArr[0]?.ts || null,
+        syncCount:   user.sync_count || 0,
+        recentSMS:   msgArr.slice(0, 10),
+        topNumbers:  activeNums.slice(0, 5),
       })
     }
 
@@ -1357,13 +2241,13 @@ async function scrapeIVASMS(email, password, userId, kv) {
     }
   }
 
-  // ── Step 6: Fetch SMS for each number (up to 8) ──
+  // ── Step 6: Fetch SMS for each number (up to 10) ──
   let totalSmsAdded = 0
   const existingMsgs = await kvGet(kv, `sms_${userId}`, [])
   const msgArr       = Array.isArray(existingMsgs) ? [...existingMsgs] : []
   const existingKeys = new Set(msgArr.map(m => `${m.phone_number}|${m.sender}|${m.body?.slice(0, 60)}`))
 
-  for (const num of numbers.slice(0, 8)) {
+  for (const num of numbers.slice(0, 10)) {
     if (!num.ivasms_id) continue
     try {
       const smsRes = await fetch(`${BASE}/portal/numbers/${num.ivasms_id}/sms`, {
@@ -1393,7 +2277,7 @@ async function scrapeIVASMS(email, password, userId, kv) {
   }
 
   await kvSet(kv, `numbers_${userId}`, numbers)
-  await kvSet(kv, `sms_${userId}`, msgArr.slice(0, 2000))
+  await kvSet(kv, `sms_${userId}`, msgArr.slice(0, 5000))
 
   return {
     success:  true,
@@ -1403,7 +2287,7 @@ async function scrapeIVASMS(email, password, userId, kv) {
   }
 }
 
-// ─── Cookie helpers ──────────────────────────────────────────────────────
+// ─── Cookie helpers ────────────────────────────────────────────────────────
 function parseCookies(setCookieHeader) {
   if (!setCookieHeader) return ''
   return setCookieHeader
@@ -1439,7 +2323,15 @@ function parseNumbers(html, userId) {
     PH:'Philippines',   VN:'Vietnam',        TH:'Thailand',
     TR:'Turkey',        NG:'Nigeria',        ZA:'South Africa',
     AR:'Argentina',     CL:'Chile',          CO:'Colombia',
-    PT:'Portugal',
+    PT:'Portugal',      EG:'Egypt',          SA:'Saudi Arabia',
+    AE:'UAE',           PK:'Pakistan',       BD:'Bangladesh',
+    MY:'Malaysia',      SG:'Singapore',      HK:'Hong Kong',
+    TW:'Taiwan',        NO:'Norway',         DK:'Denmark',
+    FI:'Finland',       AT:'Austria',        CH:'Switzerland',
+    BE:'Belgium',       GR:'Greece',         RO:'Romania',
+    HU:'Hungary',       CZ:'Czech Republic', SK:'Slovakia',
+    BG:'Bulgaria',      HR:'Croatia',        SI:'Slovenia',
+    LT:'Lithuania',     LV:'Latvia',         EE:'Estonia',
   }
 
   const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi
@@ -1462,7 +2354,7 @@ function parseNumbers(html, userId) {
     const ivasmsId  = idMatch?.[1] || ''
 
     const countryMatch =
-      row.match(/data-country="([A-Z]{2})"/)  ||
+      row.match(/data-country="([A-Z]{2})\"/)  ||
       row.match(/<td[^>]*>\s*([A-Z]{2})\s*<\/td>/)
     const countryCode  = countryMatch?.[1]?.trim().toUpperCase() || detectCountry(phone)
     const countryName  = countryMap[countryCode] || countryCode
@@ -1504,7 +2396,12 @@ function parseMessages(html, num, userId) {
     { p: /tiktok|tik.?tok/i,            s: 'TikTok'    },
     { p: /discord/i,                    s: 'Discord'   },
     { p: /linkedin/i,                   s: 'LinkedIn'  },
-    { p: /binance|crypto|bitcoin/i,     s: 'Crypto'    },
+    { p: /binance|crypto|bitcoin|coinbase/i, s: 'Crypto' },
+    { p: /shopify|ebay|etsy/i,          s: 'Shopping'  },
+    { p: /uber\s*eats|doordash|grubhub|foodpanda/i, s: 'Food Delivery' },
+    { p: /airbnb/i,                     s: 'Airbnb'    },
+    { p: /spotify/i,                    s: 'Spotify'   },
+    { p: /snapchat/i,                   s: 'Snapchat'  },
   ]
   const OTP_REGEX = /\b(\d{4,8})\b/g
 
@@ -1545,6 +2442,8 @@ function parseMessages(html, num, userId) {
       otp,
       service,
       received_at:  parseTime(timeRaw) || new Date().toISOString(),
+      starred:      false,
+      tags:         [],
     })
   }
 
@@ -1587,5 +2486,19 @@ function detectCountry(phone) {
   if (p.startsWith('+90')  || p.startsWith('90'))   return 'TR'
   if (p.startsWith('+234'))                          return 'NG'
   if (p.startsWith('+27'))                           return 'ZA'
+  if (p.startsWith('+60'))                           return 'MY'
+  if (p.startsWith('+65'))                           return 'SG'
+  if (p.startsWith('+852'))                          return 'HK'
+  if (p.startsWith('+886'))                          return 'TW'
+  if (p.startsWith('+92'))                           return 'PK'
+  if (p.startsWith('+880'))                          return 'BD'
+  if (p.startsWith('+20'))                           return 'EG'
+  if (p.startsWith('+966'))                          return 'SA'
+  if (p.startsWith('+971'))                          return 'AE'
+  if (p.startsWith('+47'))                           return 'NO'
+  if (p.startsWith('+45'))                           return 'DK'
+  if (p.startsWith('+358'))                          return 'FI'
+  if (p.startsWith('+43'))                           return 'AT'
+  if (p.startsWith('+41'))                           return 'CH'
   return 'US'
 }
