@@ -20,11 +20,9 @@ const FEATURES = [
 
 export default function LoginPage() {
   const router = useRouter()
-  const [tab, setTab] = useState<'login' | 'register'>('login')
   const [loading, setLoading] = useState(false)
   const [msg, setMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null)
-  const [loginForm, setLoginForm] = useState({ email: 'admin@dlsms.com', password: 'admin123', remember: true })
-  const [regForm, setRegForm] = useState({ name: '', email: '', password: '' })
+  const [loginForm, setLoginForm] = useState({ email: '', password: '', remember: false })
   const particlesRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -56,34 +54,10 @@ export default function LoginPage() {
     }
   }
 
-  const handleRegister = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setLoading(true)
-    setMsg(null)
-    try {
-      const r = await fetch('/api/auth/register', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(regForm),
-      })
-      const d = await r.json()
-      if (r.ok) {
-        setMsg({ type: 'success', text: '✓ Account created! Redirecting...' })
-        setTimeout(() => router.replace('/'), 800)
-      } else {
-        setMsg({ type: 'error', text: d.error || 'Registration failed' })
-      }
-    } catch {
-      setMsg({ type: 'error', text: 'Network error. Try again.' })
-    } finally {
-      setLoading(false)
-    }
-  }
-
   return (
     <div style={{ minHeight: '100vh', display: 'flex', background: 'var(--bg)', position: 'relative', overflow: 'hidden' }}>
       {/* Animated particles */}
-      <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}>
+      <div ref={particlesRef} style={{ position: 'absolute', inset: 0, overflow: 'hidden', pointerEvents: 'none', zIndex: 0 }}>
         {Array.from({ length: 30 }).map((_, i) => (
           <div key={i} style={{
             position: 'absolute',
@@ -213,22 +187,6 @@ export default function LoginPage() {
           backdropFilter: 'blur(20px)',
           boxShadow: '0 20px 60px rgba(0,0,0,.6)',
         }}>
-          {/* Tabs */}
-          <div style={{ display: 'flex', background: 'var(--bg2)', borderRadius: 8, padding: 4, marginBottom: 28 }}>
-            {(['login', 'register'] as const).map(t => (
-              <button key={t} onClick={() => { setTab(t); setMsg(null) }} style={{
-                flex: 1, padding: '8px', borderRadius: 6, fontSize: 13, fontWeight: 600,
-                background: tab === t ? 'var(--card)' : 'transparent',
-                color: tab === t ? 'var(--text)' : 'var(--text3)',
-                border: tab === t ? '1px solid var(--border)' : '1px solid transparent',
-                boxShadow: tab === t ? '0 2px 8px rgba(0,0,0,.3)' : 'none',
-                transition: 'all .2s', cursor: 'pointer',
-              }}>
-                {t === 'login' ? 'Sign In' : 'Register'}
-              </button>
-            ))}
-          </div>
-
           {/* Alert */}
           {msg && (
             <div style={{
@@ -239,70 +197,53 @@ export default function LoginPage() {
             }}>{msg.text}</div>
           )}
 
-          {tab === 'login' ? (
-            <form onSubmit={handleLogin}>
-              <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: 32, marginBottom: 6 }}>💀</div>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Welcome Back</h2>
-                <p style={{ color: 'var(--text3)', fontSize: 13 }}>Sign in to your Death Legion account</p>
+          <form onSubmit={handleLogin}>
+            <div style={{ textAlign: 'center', marginBottom: 24 }}>
+              <div style={{ fontSize: 40, marginBottom: 8 }}>💀</div>
+              <h2 style={{ fontSize: 22, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Welcome Back</h2>
+              <p style={{ color: 'var(--text3)', fontSize: 13 }}>Sign in to your Death Legion account</p>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--text3)', display: 'block', marginBottom: 5, letterSpacing: 1, textTransform: 'uppercase' }}>Email</label>
+                <input
+                  type="email"
+                  value={loginForm.email}
+                  placeholder="Enter your email"
+                  onChange={e => setLoginForm(p => ({ ...p, email: e.target.value }))}
+                  required
+                  autoComplete="username"
+                  style={{ width: '100%' }}
+                />
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--text3)', display: 'block', marginBottom: 5 }}>EMAIL</label>
-                  <input type="email" value={loginForm.email} placeholder="admin@dlsms.com"
-                    onChange={e => setLoginForm(p => ({ ...p, email: e.target.value }))} required />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--text3)', display: 'block', marginBottom: 5 }}>PASSWORD</label>
-                  <input type="password" value={loginForm.password} placeholder="••••••••"
-                    onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))} required />
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13, color: 'var(--text2)' }}>
-                    <input type="checkbox" checked={loginForm.remember}
-                      onChange={e => setLoginForm(p => ({ ...p, remember: e.target.checked }))}
-                      style={{ width: 'auto', accentColor: 'var(--accent)' }} />
-                    Remember me
-                  </label>
-                  <button type="button" onClick={() => { setTab('register'); setMsg(null) }}
-                    style={{ background: 'none', border: 'none', color: 'var(--accent)', fontSize: 12, cursor: 'pointer', padding: 0 }}>
-                    Create account
-                  </button>
-                </div>
-                <button type="submit" disabled={loading} className="btn-primary" style={{ padding: '12px', fontSize: 14, marginTop: 4 }}>
-                  {loading ? '⟳ Signing in...' : '🔐 Sign In'}
-                </button>
+              <div>
+                <label style={{ fontSize: 12, color: 'var(--text3)', display: 'block', marginBottom: 5, letterSpacing: 1, textTransform: 'uppercase' }}>Password</label>
+                <input
+                  type="password"
+                  value={loginForm.password}
+                  placeholder="Enter your password"
+                  onChange={e => setLoginForm(p => ({ ...p, password: e.target.value }))}
+                  required
+                  autoComplete="current-password"
+                  style={{ width: '100%' }}
+                />
               </div>
-            </form>
-          ) : (
-            <form onSubmit={handleRegister}>
-              <div style={{ textAlign: 'center', marginBottom: 20 }}>
-                <div style={{ fontSize: 32, marginBottom: 6 }}>⚔️</div>
-                <h2 style={{ fontSize: 20, fontWeight: 700, color: 'var(--text)' }}>Join the Legion</h2>
-                <p style={{ color: 'var(--text3)', fontSize: 13 }}>Create your Death Legion account</p>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 7, cursor: 'pointer', fontSize: 13, color: 'var(--text2)' }}>
+                  <input
+                    type="checkbox"
+                    checked={loginForm.remember}
+                    onChange={e => setLoginForm(p => ({ ...p, remember: e.target.checked }))}
+                    style={{ width: 'auto', accentColor: 'var(--accent)' }}
+                  />
+                  Remember me
+                </label>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--text3)', display: 'block', marginBottom: 5 }}>DISPLAY NAME</label>
-                  <input type="text" value={regForm.name} placeholder="Your Name"
-                    onChange={e => setRegForm(p => ({ ...p, name: e.target.value }))} required />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--text3)', display: 'block', marginBottom: 5 }}>EMAIL</label>
-                  <input type="email" value={regForm.email} placeholder="you@example.com"
-                    onChange={e => setRegForm(p => ({ ...p, email: e.target.value }))} required />
-                </div>
-                <div>
-                  <label style={{ fontSize: 12, color: 'var(--text3)', display: 'block', marginBottom: 5 }}>PASSWORD</label>
-                  <input type="password" value={regForm.password} placeholder="Min 6 characters"
-                    onChange={e => setRegForm(p => ({ ...p, password: e.target.value }))} required minLength={6} />
-                </div>
-                <button type="submit" disabled={loading} className="btn-primary" style={{ padding: '12px', fontSize: 14, marginTop: 4 }}>
-                  {loading ? '⟳ Creating...' : '⚔️ Join the Legion'}
-                </button>
-              </div>
-            </form>
-          )}
+              <button type="submit" disabled={loading} className="btn-primary" style={{ padding: '12px', fontSize: 14, marginTop: 4 }}>
+                {loading ? '⟳ Signing in...' : '🔐 Sign In'}
+              </button>
+            </div>
+          </form>
 
           <p style={{ textAlign: 'center', color: 'var(--text3)', fontSize: 11, marginTop: 20 }}>
             DL SMS © 2025 · TEAM DEATH LEGION 💀

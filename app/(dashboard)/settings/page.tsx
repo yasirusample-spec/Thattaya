@@ -15,7 +15,6 @@ export default function SettingsPage() {
   const [user,        setUser]        = useState<any>(null)
   const [profile,     setProfile]     = useState({ name: '', email: '' })
   const [passwords,   setPasswords]   = useState({ old: '', new: '', confirm: '' })
-  const [ivasms,      setIvasms]      = useState({ email: '', password: '' })
   const [telegram,    setTelegram]    = useState({ botToken: '', chatId: '' })
   const [prefs,       setPrefs]       = useState({ auto_sync: false, auto_sync_interval: 300, notify_otp: true, notify_sms: false })
   const [token,       setToken]       = useState('')
@@ -23,9 +22,7 @@ export default function SettingsPage() {
   const [msgs,        setMsgs]        = useState<Record<string, { type: 'success' | 'error'; text: string } | null>>({})
   const [loading,     setLoading]     = useState<Record<string, boolean>>({})
   const [showPwd,     setShowPwd]     = useState(false)
-  const [showIvasPwd, setShowIvasPwd] = useState(false)
   const [copied,      setCopied]      = useState<string | null>(null)
-  const [testingIvas, setTestingIvas] = useState(false)
   const [testingTg,   setTestingTg]   = useState(false)
   const [tab,         setTab]         = useState<'account'|'integrations'|'preferences'|'token'>('account')
 
@@ -36,7 +33,6 @@ export default function SettingsPage() {
         if (d.user) {
           setUser(d.user)
           setProfile({ name: d.user.name || '', email: d.user.email || '' })
-          setIvasms({ email: d.user.ivasms_email || '', password: '' })
           setTelegram({ botToken: d.user.telegram_bot_token || '', chatId: d.user.telegram_chat_id || '' })
           setToken(d.user.mobile_token || '')
           setApiKey(d.user.api_key || '')
@@ -78,36 +74,6 @@ export default function SettingsPage() {
       else setMsg('password', 'error', d.error || 'Failed')
     } catch { setMsg('password', 'error', 'Network error') }
     setLoad('password', false)
-  }
-
-  const saveIvasms = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!ivasms.email.trim()) { setMsg('ivasms', 'error', 'Email is required'); return }
-    if (!ivasms.password.trim()) { setMsg('ivasms', 'error', 'Password is required'); return }
-    setLoad('ivasms', true)
-    try {
-      const r = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'ivasms', email: ivasms.email.trim(), password: ivasms.password.trim() }) })
-      const d = await r.json()
-      if (r.ok) { setMsg('ivasms', 'success', 'iVASMS credentials saved!'); if (d.user) setUser(d.user) }
-      else setMsg('ivasms', 'error', d.error || 'Failed')
-    } catch { setMsg('ivasms', 'error', 'Network error') }
-    setLoad('ivasms', false)
-  }
-
-  const testIvasms = async () => {
-    if (!ivasms.email.trim() || !ivasms.password.trim()) { setMsg('ivasms', 'error', 'Enter both email and password first'); return }
-    setTestingIvas(true)
-    try {
-      const saveR = await fetch('/api/settings', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'ivasms', email: ivasms.email.trim(), password: ivasms.password.trim() }) })
-      if (!saveR.ok) { const sd = await saveR.json(); setMsg('ivasms', 'error', 'Failed to save: ' + (sd.error || 'Unknown')); setTestingIvas(false); return }
-      const sd = await saveR.json()
-      if (sd.user) setUser(sd.user)
-      const syncR = await fetch('/api/ivasms/sync', { method: 'POST' })
-      const syncD = await syncR.json()
-      if (syncD.success) setMsg('ivasms', 'success', `✅ Connected! ${syncD.count} numbers · ${syncD.smsAdded ?? 0} SMS loaded.`)
-      else setMsg('ivasms', 'error', syncD.error || 'Connection test failed — check credentials.')
-    } catch { setMsg('ivasms', 'error', 'Network error during test') }
-    setTestingIvas(false)
   }
 
   const saveTelegram = async (e: React.FormEvent) => {
@@ -274,50 +240,61 @@ export default function SettingsPage() {
       {/* ── Integrations tab ── */}
       {tab === 'integrations' && (
         <>
-          <Section icon="bi-phone-fill" title="iVASMS Credentials" badge={user?.ivasms_email ? 'Connected' : undefined}>
-            <div className="alert alert-info" style={{ marginBottom: 16 }}>
-              <i className="bi bi-info-circle-fill" />
-              <div>Enter your <strong>iVASMS.com</strong> account email and password. Click <strong>Save & Test</strong> to verify and auto-sync numbers and SMS.</div>
-            </div>
-            <form onSubmit={saveIvasms}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14, marginBottom: 14 }}>
-                <div className="form-group">
-                  <label className="form-label">iVASMS Email</label>
-                  <div className="input-group">
-                    <i className="bi bi-envelope-fill input-icon" />
-                    <input type="email" value={ivasms.email} onChange={e => setIvasms(p => ({ ...p, email: e.target.value }))} placeholder="ohlivvy53@gmail.com" autoComplete="off" />
-                  </div>
+          <Section icon="bi-phone-fill" title="iVASMS Integration" badge="System Configured">
+            {/* iVASMS is locked — credentials are system-managed, not user-configurable */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div style={{
+                padding: '16px 20px',
+                background: 'linear-gradient(135deg, rgba(0,230,118,.08), rgba(0,230,118,.04))',
+                border: '1px solid rgba(0,230,118,.25)',
+                borderRadius: 12,
+                display: 'flex', alignItems: 'center', gap: 14,
+              }}>
+                <div style={{
+                  width: 44, height: 44, borderRadius: 10, flexShrink: 0,
+                  background: 'rgba(0,230,118,.15)', border: '1px solid rgba(0,230,118,.3)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}>
+                  <i className="bi bi-shield-check-fill" style={{ fontSize: 20, color: 'var(--green)' }} />
                 </div>
-                <div className="form-group">
-                  <label className="form-label">iVASMS Password</label>
-                  <div className="input-group" style={{ position: 'relative' }}>
-                    <i className="bi bi-lock-fill input-icon" />
-                    <input type={showIvasPwd ? 'text' : 'password'} value={ivasms.password} onChange={e => setIvasms(p => ({ ...p, password: e.target.value }))} placeholder="Your iVASMS password" autoComplete="new-password" />
-                    <button type="button" onClick={() => setShowIvasPwd(p => !p)} style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', color: 'var(--text3)', padding: 4, cursor: 'pointer', width: 'auto' }}>
-                      <i className={`bi ${showIvasPwd ? 'bi-eye-slash-fill' : 'bi-eye-fill'}`} style={{ fontSize: 15 }} />
-                    </button>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)', marginBottom: 3 }}>
+                    iVASMS — System Configured ✓
+                  </div>
+                  <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>
+                    iVASMS credentials are securely managed by the system administrator.
+                    Numbers and SMS are synced automatically.
                   </div>
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
-                <button type="submit" className="btn-primary btn-sm" disabled={loading.ivasms}>
-                  <i className="bi bi-save-fill" style={{ fontSize: 13 }} />
-                  {loading.ivasms ? 'Saving…' : 'Save Credentials'}
-                </button>
-                <button type="button" onClick={testIvasms} disabled={testingIvas || !ivasms.email.trim() || !ivasms.password.trim()} className="btn-success btn-sm">
-                  <i className="bi bi-arrow-repeat" style={{ animation: testingIvas ? 'spin 1s linear infinite' : 'none', display: 'inline-block', fontSize: 13 }} />
-                  {testingIvas ? 'Testing & Syncing…' : 'Save & Test Connection'}
-                </button>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                {[
+                  { icon: 'bi-envelope-fill', label: 'Account', value: '●●●●●●●●@●●●●●●●.com', color: 'var(--blue)' },
+                  { icon: 'bi-lock-fill',     label: 'Password', value: '●●●●●●●●●●●●', color: 'var(--accent)' },
+                  { icon: 'bi-telephone-fill',label: 'Numbers Synced', value: '1,000+', color: 'var(--green)' },
+                  { icon: 'bi-arrow-repeat',  label: 'Auto-Sync', value: 'Active', color: 'var(--yellow)' },
+                ].map(row => (
+                  <div key={row.label} style={{
+                    padding: '10px 14px',
+                    background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8,
+                    display: 'flex', alignItems: 'center', gap: 10,
+                  }}>
+                    <i className={`bi ${row.icon}`} style={{ color: row.color, fontSize: 14, flexShrink: 0 }} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 1 }}>{row.label}</div>
+                      <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.value}</div>
+                    </div>
+                  </div>
+                ))}
               </div>
-              <MsgBox msg={msgs.ivasms} />
-            </form>
-            {user?.ivasms_email && (
-              <div style={{ marginTop: 12, padding: '8px 12px', background: 'var(--green-dim)', border: '1px solid rgba(0,230,118,.25)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
                 <span className="dot dot-green dot-pulse" />
-                <span style={{ color: 'var(--green)', fontWeight: 600 }}>Saved:</span>
-                <span style={{ color: 'var(--text2)', fontFamily: 'monospace' }}>{user.ivasms_email}</span>
+                <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>Connected & Syncing</span>
+                <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 4 }}>· Managed by Death Legion Admin</span>
               </div>
-            )}
+            </div>
           </Section>
 
           <Section icon="bi-telegram" title="Telegram Bot">
