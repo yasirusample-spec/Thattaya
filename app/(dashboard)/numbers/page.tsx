@@ -20,6 +20,7 @@ export default function NumbersPage() {
   const [statusFilter,  setStatusFilter]  = useState('')
   const [syncing,       setSyncing]       = useState(false)
   const [syncMsg,       setSyncMsg]       = useState<{ ok: boolean; text: string } | null>(null)
+  const [needsSync,     setNeedsSync]     = useState(false)
   const [loading,       setLoading]       = useState(true)
   const [expandedId,    setExpandedId]    = useState<string | null>(null)
   const [smsMap,        setSmsMap]        = useState<Record<string, any[]>>({})
@@ -33,8 +34,9 @@ export default function NumbersPage() {
     try {
       const r = await fetch('/api/ivasms/numbers')
       if (r.ok) {
-        const { numbers: nums } = await r.json()
-        setNumbers(nums || [])
+        const d = await r.json()
+        setNumbers(d.numbers || [])
+        setNeedsSync(d.needsSync === true)
       }
     } catch {}
     setLoading(false)
@@ -291,20 +293,37 @@ export default function NumbersPage() {
             <p style={{ color: 'var(--text3)', fontSize: 13 }}>Loading numbers…</p>
           </div>
         ) : filtered.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', color: 'var(--text3)' }}>
-            <i className="bi bi-phone-fill" style={{ fontSize: 44, display: 'block', marginBottom: 16, opacity: .2 }} />
-            <p style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: 'var(--text2)' }}>
-              {numbers.length === 0 ? 'No numbers synced yet' : 'No numbers match your filter'}
-            </p>
-            <p style={{ fontSize: 13, marginBottom: 20 }}>
-              {numbers.length === 0
-                ? 'Add iVASMS credentials in Settings → iVASMS Credentials, then click Sync.'
-                : 'Try removing filters to see all numbers.'}
-            </p>
-            {numbers.length === 0 && (
-              <button onClick={handleSync} className="btn-primary" style={{ display: 'inline-flex', gap: 7 }}>
-                <i className="bi bi-arrow-repeat" style={{ fontSize: 15 }} />Sync Now
-              </button>
+          <div style={{ padding: 56, textAlign: 'center', color: 'var(--text3)' }}>
+            {needsSync || numbers.length === 0 ? (
+              <>
+                <div style={{ fontSize: 56, marginBottom: 16 }}>📡</div>
+                <p style={{ fontSize: 17, fontWeight: 700, marginBottom: 8, color: 'var(--text)' }}>Sync Required</p>
+                <p style={{ fontSize: 13, marginBottom: 8, lineHeight: 1.7 }}>
+                  No numbers loaded yet. Click <strong>Sync iVASMS</strong> to pull your real<br />
+                  phone numbers from iVASMS.com.
+                </p>
+                <p style={{ fontSize: 12, marginBottom: 24, color: 'var(--text3)' }}>
+                  iVASMS credentials are pre-configured — just click Sync.
+                </p>
+                <button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="btn-primary"
+                  style={{ display: 'inline-flex', gap: 8, padding: '11px 24px', fontSize: 15 }}
+                >
+                  <i className="bi bi-arrow-repeat" style={{ fontSize: 16, animation: syncing ? 'spin 1s linear infinite' : 'none', display: 'inline-block' }} />
+                  {syncing ? 'Syncing iVASMS…' : 'Sync iVASMS Now'}
+                </button>
+              </>
+            ) : (
+              <>
+                <i className="bi bi-phone-fill" style={{ fontSize: 44, display: 'block', marginBottom: 16, opacity: .2 }} />
+                <p style={{ fontSize: 15, fontWeight: 600, marginBottom: 8, color: 'var(--text2)' }}>No numbers match your filter</p>
+                <p style={{ fontSize: 13, marginBottom: 20 }}>Try removing filters to see all numbers.</p>
+                <button className="btn-ghost btn-sm" onClick={() => { setSearch(''); setStatusFilter('') }}>
+                  <i className="bi bi-x" /> Clear Filters
+                </button>
+              </>
             )}
           </div>
         ) : (

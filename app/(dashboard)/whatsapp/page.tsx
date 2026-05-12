@@ -1,567 +1,519 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
-const KNOWN_DEVICES = [
-  { model: 'Samsung Galaxy S25 Ultra', brand: 'Samsung', os: 'Android 15', icon: '📱', color: '#1428a0' },
-  { model: 'Samsung Galaxy S25+',      brand: 'Samsung', os: 'Android 15', icon: '📱', color: '#1428a0' },
-  { model: 'Samsung Galaxy S24 Ultra', brand: 'Samsung', os: 'Android 14', icon: '📱', color: '#1428a0' },
-  { model: 'Samsung Galaxy Z Fold 6',  brand: 'Samsung', os: 'Android 14', icon: '📱', color: '#1428a0' },
-  { model: 'Samsung Galaxy A55',       brand: 'Samsung', os: 'Android 14', icon: '📱', color: '#1428a0' },
-  { model: 'Google Pixel 9 Pro XL',   brand: 'Google',  os: 'Android 15', icon: '🔵', color: '#4285f4' },
-  { model: 'Google Pixel 9 Pro',      brand: 'Google',  os: 'Android 15', icon: '🔵', color: '#4285f4' },
-  { model: 'Google Pixel 9',          brand: 'Google',  os: 'Android 15', icon: '🔵', color: '#4285f4' },
-  { model: 'Google Pixel 8a',         brand: 'Google',  os: 'Android 14', icon: '🔵', color: '#4285f4' },
-  { model: 'iPhone 16 Pro Max',       brand: 'Apple',   os: 'iOS 18',     icon: '🍎', color: '#555' },
-  { model: 'iPhone 16 Pro',           brand: 'Apple',   os: 'iOS 18',     icon: '🍎', color: '#555' },
-  { model: 'iPhone 16',               brand: 'Apple',   os: 'iOS 18',     icon: '🍎', color: '#555' },
-  { model: 'iPhone 15 Pro Max',       brand: 'Apple',   os: 'iOS 17',     icon: '🍎', color: '#555' },
-  { model: 'OnePlus 13',              brand: 'OnePlus', os: 'Android 15', icon: '📲', color: '#f5010c' },
-  { model: 'Xiaomi 15 Ultra',         brand: 'Xiaomi',  os: 'Android 15', icon: '📲', color: '#ff6900' },
-  { model: 'Xiaomi Redmi Note 13',    brand: 'Xiaomi',  os: 'Android 13', icon: '📲', color: '#ff6900' },
-  { model: 'OPPO Find X8 Pro',        brand: 'OPPO',    os: 'Android 15', icon: '📲', color: '#1d6fa4' },
-  { model: 'Realme GT 7 Pro',         brand: 'Realme',  os: 'Android 15', icon: '📲', color: '#f5a623' },
-  { model: 'Custom / Other',          brand: 'Other',   os: 'Android/iOS',icon: '📲', color: '#666' },
-]
-
-function fmtTime(ts: string) {
-  try {
-    const d = new Date(ts)
-    const diff = Date.now() - d.getTime()
-    if (diff < 60000) return 'just now'
-    if (diff < 3600000) return `${Math.floor(diff/60000)}m ago`
-    if (diff < 86400000) return `${Math.floor(diff/3600000)}h ago`
-    return d.toLocaleDateString()
-  } catch { return ts }
+interface Contact {
+  id: string
+  name: string
+  phone: string
+  avatar: string | null
+  addedAt: string
+  lastMessage: string | null
+  lastMessageAt: string | null
+  unread: number
 }
 
-function DeviceBrandIcon({ brand, size = 16 }: { brand: string; size?: number }) {
-  const colors: Record<string, string> = {
-    Samsung: '#1428a0', Google: '#4285f4', Apple: '#555',
-    OnePlus: '#f5010c', Xiaomi: '#ff6900', OPPO: '#1d6fa4',
-    Realme: '#f5a623', Other: '#666',
-  }
-  const icons: Record<string, string> = {
-    Samsung: 'bi-phone-fill', Google: 'bi-phone-fill', Apple: 'bi-phone-fill',
-    OnePlus: 'bi-phone-fill', Xiaomi: 'bi-phone-fill', Other: 'bi-phone-fill',
-  }
-  return <i className={`bi ${icons[brand] || 'bi-phone-fill'}`} style={{ fontSize: size, color: colors[brand] || '#666' }} />
+interface Message {
+  id: string
+  from: 'me' | string
+  to: string
+  body: string
+  sent_at: string
+  status: string
+  deviceId?: string | null
 }
+
+interface Device {
+  id: string
+  name: string
+  model: string
+  brand: string
+  os: string
+  icon: string
+  phone: string
+  status: string
+  batteryPct?: number
+  lastSeen: string
+  linkedAt: string
+}
+
+type Tab = 'contacts' | 'devices' | 'broadcast' | 'send'
 
 export default function WhatsAppPage() {
-  const [status,      setStatus]      = useState<any>(null)
-  const [numbers,     setNumbers]     = useState<any[]>([])
-  const [messages,    setMessages]    = useState<any[]>([])
-  const [devices,     setDevices]     = useState<any[]>([])
-  const [stats,       setStats]       = useState<any>(null)
-  const [selNum,      setSelNum]      = useState('')
-  const [linking,     setLinking]     = useState(false)
-  const [unlinking,   setUnlinking]   = useState(false)
-  const [sendTo,      setSendTo]      = useState('')
-  const [sendMsg,     setSendMsg]     = useState('')
-  const [sending,     setSending]     = useState(false)
-  const [result,      setResult]      = useState<any>(null)
-  const [tab,         setTab]         = useState<'status'|'devices'|'messages'|'send'|'broadcast'>('status')
-  const [showAddDev,  setShowAddDev]  = useState(false)
-  const [devModel,    setDevModel]    = useState('')
-  const [devName,     setDevName]     = useState('')
-  const [devPhone,    setDevPhone]    = useState('')
-  const [addingDev,   setAddingDev]   = useState(false)
-  const [broadTargets,setBroadTargets]= useState('')
-  const [broadMsg,    setBroadMsg]    = useState('')
-  const [broadcasting,setBroadcasting]= useState(false)
-  const [broadHist,   setBroadHist]   = useState<any[]>([])
-  const pollRef = useRef<ReturnType<typeof setInterval>|null>(null)
+  const [tab, setTab] = useState<Tab>('contacts')
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [devices, setDevices] = useState<Device[]>([])
+  const [activeContact, setActiveContact] = useState<Contact | null>(null)
+  const [thread, setThread] = useState<Message[]>([])
+  const [loadingContacts, setLoadingContacts] = useState(true)
+  const [loadingThread, setLoadingThread] = useState(false)
+  const [sendingMsg, setSendingMsg] = useState(false)
+  const [msgInput, setMsgInput] = useState('')
+  const [showAddContact, setShowAddContact] = useState(false)
+  const [addName, setAddName] = useState('')
+  const [addPhone, setAddPhone] = useState('')
+  const [addingContact, setAddingContact] = useState(false)
+  const [addError, setAddError] = useState('')
+  const [loadingDevices, setLoadingDevices] = useState(false)
+  const [broadcastMsg, setBroadcastMsg] = useState('')
+  const [broadcastTargets, setBroadcastTargets] = useState('')
+  const [broadcasting, setBroadcasting] = useState(false)
+  const [broadcastResult, setBroadcastResult] = useState<any>(null)
+  const [quickTo, setQuickTo] = useState('')
+  const [quickMsg, setQuickMsg] = useState('')
+  const [quickSending, setQuickSending] = useState(false)
+  const [quickResult, setQuickResult] = useState<any>(null)
+  const [showDeviceModal, setShowDeviceModal] = useState(false)
+  const [devName, setDevName] = useState('')
+  const [devModel, setDevModel] = useState('Samsung Galaxy S25 Ultra')
+  const [devPhone, setDevPhone] = useState('')
+  const [addingDevice, setAddingDevice] = useState(false)
+  const bottomRef = useRef<HTMLDivElement>(null)
+  const pollRef = useRef<NodeJS.Timeout | null>(null)
 
-  const load = useCallback(async () => {
+  const loadContacts = useCallback(async () => {
     try {
-      const [sr, nr, dr, stR, bh] = await Promise.all([
-        fetch('/api/whatsapp/status').then(r=>r.json()),
-        fetch('/api/ivasms/numbers').then(r=>r.json()),
-        fetch('/api/whatsapp/devices').then(r=>r.json()),
-        fetch('/api/whatsapp/stats').then(r=>r.json()),
-        fetch('/api/whatsapp/broadcast').then(r=>r.json()),
-      ])
-      setStatus(sr)
-      setNumbers((nr.numbers||[]).filter((n:any)=>n.status==='active'||n.status==='inactive'))
-      setDevices(dr.devices||[])
-      setStats(stR)
-      setBroadHist(bh.history||[])
-      if (sr.connected) {
-        const mr = await fetch('/api/whatsapp/messages')
-        if (mr.ok) { const d=await mr.json(); setMessages(d.messages||[]) }
+      const r = await fetch('/api/whatsapp/contacts')
+      if (r.ok) {
+        const d = await r.json()
+        setContacts(Array.isArray(d.contacts) ? d.contacts : [])
       }
     } catch {}
+    setLoadingContacts(false)
+  }, [])
+
+  const loadThread = useCallback(async (phone: string) => {
+    setLoadingThread(true)
+    try {
+      const r = await fetch(`/api/whatsapp/thread?phone=${encodeURIComponent(phone)}`)
+      if (r.ok) {
+        const d = await r.json()
+        setThread(Array.isArray(d.messages) ? d.messages : [])
+      }
+    } catch {}
+    setLoadingThread(false)
+  }, [])
+
+  const loadDevices = useCallback(async () => {
+    setLoadingDevices(true)
+    try {
+      const r = await fetch('/api/whatsapp/devices')
+      if (r.ok) {
+        const d = await r.json()
+        setDevices(Array.isArray(d.devices) ? d.devices : [])
+      }
+    } catch {}
+    setLoadingDevices(false)
   }, [])
 
   useEffect(() => {
-    load()
-    pollRef.current = setInterval(load, 5000)
+    loadContacts()
+  }, [loadContacts])
+
+  useEffect(() => {
+    if (tab === 'devices') loadDevices()
+  }, [tab, loadDevices])
+
+  // Poll thread every 3s when a contact is open
+  useEffect(() => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    if (activeContact) {
+      pollRef.current = setInterval(() => {
+        loadThread(activeContact.phone)
+      }, 3000)
+    }
     return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [load])
+  }, [activeContact, loadThread])
 
-  const linkNumber = async () => {
-    if (!selNum) { setResult({error:'Select a number'}); return }
-    const num = numbers.find((n:any)=>n.id===selNum)
-    setLinking(true); setResult(null)
-    try {
-      const r = await fetch('/api/whatsapp/link',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({numberId:selNum, numberPhone:num?.phone}),
-      })
-      const d = await r.json()
-      if (d.ok) { setResult({success:`WhatsApp linked to ${d.phone}`}); load() }
-      else setResult({error:d.error||'Link failed'})
-    } catch(e:any) { setResult({error:e.message}) }
-    setLinking(false)
-  }
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [thread])
 
-  const unlinkNumber = async () => {
-    if (!confirm('Unlink WhatsApp? All devices will be disconnected.')) return
-    setUnlinking(true)
-    try { await fetch('/api/whatsapp/unlink',{method:'POST'}); load() } catch {}
-    setUnlinking(false)
+  const openContact = async (c: Contact) => {
+    setActiveContact(c)
+    setThread([])
+    await loadThread(c.phone)
+    // Mark unread as 0 locally
+    setContacts(prev => prev.map(x => x.id === c.id ? { ...x, unread: 0 } : x))
   }
 
   const sendMessage = async () => {
-    if (!sendTo||!sendMsg.trim()) return
-    setSending(true); setResult(null)
+    if (!msgInput.trim() || !activeContact || sendingMsg) return
+    setSendingMsg(true)
+    const body = msgInput.trim()
+    setMsgInput('')
     try {
-      const r = await fetch('/api/whatsapp/send',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({to:sendTo, message:sendMsg}),
+      const r = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: activeContact.phone, message: body }),
+      })
+      if (r.ok) {
+        const d = await r.json()
+        if (d.message) setThread(prev => [...prev, d.message])
+        setContacts(prev => prev.map(x =>
+          x.id === activeContact.id
+            ? { ...x, lastMessage: body.slice(0, 80), lastMessageAt: new Date().toISOString() }
+            : x
+        ))
+      }
+    } catch {}
+    setSendingMsg(false)
+  }
+
+  const addContact = async () => {
+    if (!addPhone.trim()) { setAddError('Phone number is required'); return }
+    setAddingContact(true)
+    setAddError('')
+    try {
+      const r = await fetch('/api/whatsapp/contacts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: addName.trim() || addPhone.trim(), phone: addPhone.trim() }),
       })
       const d = await r.json()
-      if (d.ok) { setResult({success:'Message sent!'}); setSendMsg('') }
-      else setResult({error:d.error||'Send failed'})
+      if (r.ok && d.contact) {
+        setContacts(prev => [d.contact, ...prev])
+        setShowAddContact(false)
+        setAddName('')
+        setAddPhone('')
+      } else {
+        setAddError(d.error || 'Failed to add contact')
+      }
+    } catch {
+      setAddError('Network error')
+    }
+    setAddingContact(false)
+  }
+
+  const deleteContact = async (id: string) => {
+    if (!confirm('Remove this contact?')) return
+    try {
+      await fetch(`/api/whatsapp/contacts/${id}`, { method: 'DELETE' })
+      setContacts(prev => prev.filter(c => c.id !== id))
+      if (activeContact?.id === id) setActiveContact(null)
     } catch {}
-    setSending(false)
   }
 
   const addDevice = async () => {
-    if (!devModel) { setResult({error:'Select a device model'}); return }
-    const preset = KNOWN_DEVICES.find(d=>d.model===devModel)
-    setAddingDev(true); setResult(null)
+    setAddingDevice(true)
     try {
-      const r = await fetch('/api/whatsapp/devices',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({
-          name: devName || preset?.model,
-          model: devModel,
-          brand: preset?.brand || 'Other',
-          os: preset?.os || 'Android',
-          icon: preset?.icon || '📱',
-          phone: devPhone || status?.number,
-        }),
+      const r = await fetch('/api/whatsapp/devices', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: devName || devModel, model: devModel, phone: devPhone }),
       })
-      const d = await r.json()
-      if (d.ok) { setResult({success:`Device "${d.device.name}" registered!`}); setShowAddDev(false); setDevModel(''); setDevName(''); setDevPhone(''); load() }
-      else setResult({error:d.error||'Failed to add device'})
-    } catch(e:any) { setResult({error:e.message}) }
-    setAddingDev(false)
+      if (r.ok) {
+        setShowDeviceModal(false)
+        setDevName(''); setDevModel('Samsung Galaxy S25 Ultra'); setDevPhone('')
+        loadDevices()
+      }
+    } catch {}
+    setAddingDevice(false)
   }
 
   const removeDevice = async (id: string) => {
-    if (!confirm('Remove this device?')) return
-    await fetch(`/api/whatsapp/devices/${id}`,{method:'DELETE'})
-    load()
+    if (!confirm('Disconnect this device?')) return
+    try {
+      await fetch(`/api/whatsapp/devices/${id}`, { method: 'DELETE' })
+      setDevices(prev => prev.filter(d => d.id !== id))
+    } catch {}
   }
 
-  const sendBroadcast = async () => {
-    if (!broadTargets.trim()||!broadMsg.trim()) return
-    const targets = broadTargets.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean)
-    if (targets.length===0) return
-    setBroadcasting(true); setResult(null)
+  const doBroadcast = async () => {
+    const targets = broadcastTargets.split(/[\n,]+/).map(t => t.trim()).filter(Boolean)
+    if (!targets.length || !broadcastMsg.trim()) return
+    setBroadcasting(true)
+    setBroadcastResult(null)
     try {
-      const r = await fetch('/api/whatsapp/broadcast',{
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({targets, message:broadMsg}),
+      const r = await fetch('/api/whatsapp/broadcast', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ targets, message: broadcastMsg }),
       })
       const d = await r.json()
-      if (d.ok) { setResult({success:`Broadcast sent to ${d.sent} recipients!`}); setBroadTargets(''); setBroadMsg(''); load() }
-      else setResult({error:d.error||'Broadcast failed'})
-    } catch(e:any) { setResult({error:e.message}) }
+      setBroadcastResult(d)
+    } catch {}
     setBroadcasting(false)
   }
 
-  const connected = status?.connected
+  const doQuickSend = async () => {
+    if (!quickTo.trim() || !quickMsg.trim()) return
+    setQuickSending(true)
+    setQuickResult(null)
+    try {
+      const r = await fetch('/api/whatsapp/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ to: quickTo.trim(), message: quickMsg.trim() }),
+      })
+      const d = await r.json()
+      setQuickResult(d)
+    } catch {}
+    setQuickSending(false)
+  }
 
-  const TABS = [
-    { id:'status',    label:'Status & Setup',  icon:'bi-info-circle-fill' },
-    { id:'devices',   label:`Devices${devices.length>0?` (${devices.length})`:''}`, icon:'bi-phone-fill' },
-    { id:'messages',  label:`Messages${messages.length>0?` (${messages.length})`:''}`, icon:'bi-chat-dots-fill' },
-    { id:'send',      label:'Send',             icon:'bi-send-fill' },
-    { id:'broadcast', label:'Broadcast',        icon:'bi-broadcast-pin' },
-  ]
+  const fmtTime = (iso: string | null) => {
+    if (!iso) return ''
+    const d = new Date(iso)
+    const now = new Date()
+    const diff = now.getTime() - d.getTime()
+    if (diff < 60000) return 'just now'
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`
+    if (diff < 86400000) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return d.toLocaleDateString()
+  }
+
+  const initials = (name: string) => name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+  const colorFor = (name: string) => {
+    const colors = ['#25D366','#128C7E','#075E54','#34B7F1','#00BFA5','#7C4DFF','#FF6D00','#E91E63']
+    let h = 0; for (const c of name) h = (h * 31 + c.charCodeAt(0)) % colors.length
+    return colors[h]
+  }
 
   return (
-    <div style={{display:'flex',flexDirection:'column',gap:20}}>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: '#111b21', color: '#e9edef', fontFamily: 'system-ui, sans-serif' }}>
 
-      {/* Header */}
-      <div style={{display:'flex',alignItems:'flex-start',justifyContent:'space-between',flexWrap:'wrap',gap:12}}>
-        <div>
-          <h2 style={{fontSize:22,fontWeight:900,color:'var(--text)',display:'flex',alignItems:'center',gap:10,margin:0}}>
-            <i className="bi bi-whatsapp" style={{color:'#25d366',fontSize:20}} />
-            WhatsApp Integration
-          </h2>
-          <p style={{color:'var(--text3)',fontSize:13,marginTop:4,marginBottom:0}}>
-            Link iVASMS numbers · Register devices · Broadcast messages
-          </p>
-        </div>
-        <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
-          {/* Stats row */}
-          {stats && (
-            <>
-              <div style={{padding:'6px 12px',background:'rgba(37,211,102,.08)',border:'1px solid rgba(37,211,102,.2)',borderRadius:8,fontSize:11,fontWeight:700,color:'#25d366',display:'flex',alignItems:'center',gap:5}}>
-                <i className="bi bi-phone-fill" style={{fontSize:11}} />{stats.devices||0} devices
-              </div>
-              <div style={{padding:'6px 12px',background:'rgba(59,130,246,.08)',border:'1px solid rgba(59,130,246,.2)',borderRadius:8,fontSize:11,fontWeight:700,color:'#3b82f6',display:'flex',alignItems:'center',gap:5}}>
-                <i className="bi bi-chat-dots-fill" style={{fontSize:11}} />{stats.received||0} received
-              </div>
-              <div style={{padding:'6px 12px',background:'rgba(229,9,20,.08)',border:'1px solid rgba(229,9,20,.2)',borderRadius:8,fontSize:11,fontWeight:700,color:'var(--accent)',display:'flex',alignItems:'center',gap:5}}>
-                <i className="bi bi-send-fill" style={{fontSize:11}} />{stats.sent||0} sent
-              </div>
-            </>
-          )}
-          {/* Connection badge */}
-          <div style={{
-            display:'flex',alignItems:'center',gap:8,padding:'8px 14px',
-            background:connected?'rgba(37,211,102,.08)':'rgba(255,255,255,.04)',
-            border:`1px solid ${connected?'rgba(37,211,102,.25)':'var(--border)'}`,
-            borderRadius:20,fontSize:13,fontWeight:700,
-            color:connected?'#25d366':'var(--text3)',
-          }}>
-            <span style={{width:8,height:8,borderRadius:'50%',background:connected?'#25d366':'var(--text3)',animation:connected?'livePulse 2s ease-in-out infinite':'none'}} />
-            {connected?`Connected: ${status?.number}`:'Disconnected'}
-          </div>
-        </div>
-      </div>
-
-      {/* Tabs */}
-      <div className="tab-bar">
-        {TABS.map(t=>(
-          <button key={t.id} className={`tab-item ${tab===t.id?'active':''}`} onClick={()=>setTab(t.id as any)}>
-            <i className={`bi ${t.icon}`} style={{marginRight:6,fontSize:12}} />{t.label}
-          </button>
+      {/* Top nav tabs */}
+      <div style={{ display: 'flex', background: '#202c33', borderBottom: '1px solid #2a3942', padding: '0 16px' }}>
+        {([
+          { key: 'contacts', label: '💬 Contacts & Chat' },
+          { key: 'devices', label: '📱 Devices' },
+          { key: 'broadcast', label: '📢 Broadcast' },
+          { key: 'send', label: '✉️ Quick Send' },
+        ] as { key: Tab; label: string }[]).map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)} style={{
+            padding: '14px 18px', border: 'none', cursor: 'pointer', fontWeight: 600, fontSize: 14,
+            background: 'transparent',
+            color: tab === t.key ? '#00a884' : '#aebac1',
+            borderBottom: tab === t.key ? '2px solid #00a884' : '2px solid transparent',
+            transition: 'all 0.2s',
+          }}>{t.label}</button>
         ))}
       </div>
 
-      {/* Global result alert */}
-      {result && (
-        <div className={`alert ${result.error?'alert-error':'alert-success'}`}>
-          <i className={`bi ${result.error?'bi-exclamation-triangle-fill':'bi-check-circle-fill'}`} />
-          {result.error||result.success}
-          <button onClick={()=>setResult(null)} style={{marginLeft:'auto',background:'none',border:'none',color:'inherit',cursor:'pointer',padding:2}}><i className="bi bi-x" /></button>
-        </div>
-      )}
+      {/* ── CONTACTS & CHAT TAB ── */}
+      {tab === 'contacts' && (
+        <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
 
-      {/* ── STATUS & SETUP ── */}
-      {tab==='status' && (
-        <div style={{display:'flex',flexDirection:'column',gap:16}}>
-          {!connected ? (
-            <div className="card">
-              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:20,paddingBottom:14,borderBottom:'1px solid var(--border)'}}>
-                <div style={{width:36,height:36,borderRadius:9,background:'rgba(37,211,102,.1)',border:'1px solid rgba(37,211,102,.2)',display:'flex',alignItems:'center',justifyContent:'center'}}>
-                  <i className="bi bi-link-45deg" style={{fontSize:17,color:'#25d366'}} />
-                </div>
-                <div>
-                  <h3 style={{fontSize:15,fontWeight:700,color:'var(--text)',margin:0}}>Link iVASMS Number</h3>
-                  <p style={{fontSize:12,color:'var(--text3)',margin:'2px 0 0'}}>Connect a phone number to enable WhatsApp features</p>
-                </div>
-              </div>
+          {/* Left sidebar — contacts list */}
+          <div style={{ width: 340, borderRight: '1px solid #2a3942', display: 'flex', flexDirection: 'column', background: '#111b21' }}>
+            {/* Header */}
+            <div style={{ padding: '12px 16px', background: '#202c33', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontWeight: 700, fontSize: 16 }}>WhatsApp</span>
+              <button onClick={() => setShowAddContact(true)} style={{
+                background: '#00a884', color: '#fff', border: 'none', borderRadius: 20,
+                padding: '6px 14px', cursor: 'pointer', fontWeight: 600, fontSize: 13,
+              }}>+ Add Contact</button>
+            </div>
 
-              {/* Steps */}
-              <div style={{display:'flex',alignItems:'center',gap:0,marginBottom:24}}>
-                {['Sync Numbers','Select Number','Link WhatsApp'].map((step,i)=>(
-                  <div key={step} style={{display:'flex',alignItems:'center',flex:i<2?1:'none'}}>
-                    <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
-                      <div style={{
-                        width:28,height:28,borderRadius:'50%',display:'flex',alignItems:'center',justifyContent:'center',
-                        fontSize:12,fontWeight:800,
-                        background:i===0&&numbers.length>0?'rgba(37,211,102,.15)':i===0?'rgba(37,211,102,.08)':'rgba(255,255,255,.05)',
-                        border:`2px solid ${i===0&&numbers.length>0?'var(--green)':i===0?'rgba(37,211,102,.4)':'var(--border)'}`,
-                        color:i===0&&numbers.length>0?'var(--green)':i===0?'rgba(37,211,102,.8)':'var(--text3)',
-                      }}>
-                        {i===0&&numbers.length>0?<i className="bi bi-check-lg" style={{fontSize:13}} />:i+1}
+            {/* Search placeholder */}
+            <div style={{ padding: '8px 12px', background: '#111b21', borderBottom: '1px solid #2a3942' }}>
+              <input placeholder="🔍 Search contacts..." style={{
+                width: '100%', background: '#202c33', border: 'none', borderRadius: 8,
+                padding: '8px 12px', color: '#e9edef', fontSize: 14, boxSizing: 'border-box',
+              }} />
+            </div>
+
+            {/* Contacts list */}
+            <div style={{ flex: 1, overflowY: 'auto' }}>
+              {loadingContacts ? (
+                <div style={{ padding: 32, textAlign: 'center', color: '#8696a0' }}>Loading contacts…</div>
+              ) : contacts.length === 0 ? (
+                <div style={{ padding: 32, textAlign: 'center', color: '#8696a0' }}>
+                  <div style={{ fontSize: 48, marginBottom: 12 }}>💬</div>
+                  <div style={{ fontWeight: 600, marginBottom: 8 }}>No contacts yet</div>
+                  <div style={{ fontSize: 13 }}>Click "Add Contact" to add a WhatsApp number</div>
+                </div>
+              ) : (
+                contacts.map(c => (
+                  <div key={c.id} onClick={() => openContact(c)} style={{
+                    display: 'flex', alignItems: 'center', padding: '12px 16px', cursor: 'pointer',
+                    background: activeContact?.id === c.id ? '#2a3942' : 'transparent',
+                    borderBottom: '1px solid #1f2c34',
+                    transition: 'background 0.15s',
+                  }}
+                    onMouseEnter={e => { if (activeContact?.id !== c.id) (e.currentTarget as HTMLDivElement).style.background = '#1f2c34' }}
+                    onMouseLeave={e => { if (activeContact?.id !== c.id) (e.currentTarget as HTMLDivElement).style.background = 'transparent' }}
+                  >
+                    {/* Avatar */}
+                    <div style={{
+                      width: 46, height: 46, borderRadius: '50%', flexShrink: 0, marginRight: 12,
+                      background: colorFor(c.name), display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontWeight: 700, fontSize: 16, color: '#fff',
+                    }}>{initials(c.name)}</div>
+
+                    {/* Info */}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
+                        <span style={{ fontWeight: 600, fontSize: 15, color: '#e9edef', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
+                        <span style={{ fontSize: 11, color: '#8696a0', flexShrink: 0, marginLeft: 8 }}>{fmtTime(c.lastMessageAt)}</span>
                       </div>
-                      <div style={{fontSize:10,fontWeight:600,color:'var(--text3)',whiteSpace:'nowrap'}}>{step}</div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <span style={{ fontSize: 13, color: '#8696a0', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {c.lastMessage || c.phone}
+                        </span>
+                        {c.unread > 0 && (
+                          <span style={{ background: '#00a884', color: '#111', borderRadius: 10, padding: '2px 7px', fontSize: 11, fontWeight: 700, flexShrink: 0, marginLeft: 6 }}>{c.unread}</span>
+                        )}
+                      </div>
                     </div>
-                    {i<2&&<div style={{flex:1,height:2,background:i===0&&numbers.length>0?'var(--green)':'var(--border)',margin:'0 8px',marginBottom:18}} />}
-                  </div>
-                ))}
-              </div>
 
-              {numbers.length===0?(
-                <div className="alert alert-warn" style={{marginBottom:16}}>
-                  <i className="bi bi-exclamation-triangle-fill" />
-                  <div>No active numbers found. Go to <a href="/numbers" style={{color:'var(--orange)',textDecoration:'underline'}}>Numbers</a> and sync your iVASMS account first.</div>
-                </div>
-              ):(
-                <div style={{display:'flex',flexDirection:'column',gap:14}}>
-                  <div className="form-group">
-                    <label className="form-label">Select a number to link</label>
-                    <select value={selNum} onChange={e=>setSelNum(e.target.value)}>
-                      <option value="">— Choose a number —</option>
-                      {numbers.map((n:any)=>(
-                        <option key={n.id} value={n.id}>
-                          {n.phone} ({n.country_name||n.country}) — {n.status}
-                        </option>
-                      ))}
-                    </select>
+                    {/* Delete btn */}
+                    <button onClick={e => { e.stopPropagation(); deleteContact(c.id) }} style={{
+                      background: 'transparent', border: 'none', color: '#8696a0', cursor: 'pointer',
+                      fontSize: 16, padding: '4px 6px', marginLeft: 6, flexShrink: 0,
+                      opacity: 0.6,
+                    }} title="Remove contact">✕</button>
                   </div>
-                  <button onClick={linkNumber} disabled={linking||!selNum} className="btn-success" style={{gap:8}}>
-                    <i className="bi bi-whatsapp" style={{fontSize:16}} />
-                    {linking?'Linking…':'Link to WhatsApp'}
-                  </button>
-                </div>
+                ))
               )}
-            </div>
-          ):(
-            /* Connected card */
-            <div className="card">
-              <div style={{display:'flex',alignItems:'center',gap:14,marginBottom:20}}>
-                <div style={{width:60,height:60,borderRadius:16,background:'rgba(37,211,102,.12)',border:'2px solid rgba(37,211,102,.3)',display:'flex',alignItems:'center',justifyContent:'center',position:'relative'}}>
-                  <i className="bi bi-whatsapp" style={{fontSize:30,color:'#25d366'}} />
-                  <span style={{position:'absolute',bottom:4,right:4,width:12,height:12,borderRadius:'50%',background:'#25d366',border:'2px solid var(--card)',boxShadow:'0 0 8px #25d366'}} />
-                </div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:17,fontWeight:900,color:'var(--text)'}}>WhatsApp Connected</div>
-                  <div style={{fontSize:14,color:'#25d366',marginTop:3,fontFamily:'monospace',fontWeight:700}}>{status?.number}</div>
-                  <div style={{fontSize:11,color:'var(--text3)',marginTop:2}}>{devices.length} device{devices.length!==1?'s':''} registered</div>
-                </div>
-                <button onClick={unlinkNumber} disabled={unlinking} className="btn-danger btn-sm" style={{gap:6}}>
-                  <i className="bi bi-x-circle-fill" style={{fontSize:13}} />
-                  {unlinking?'Unlinking…':'Unlink'}
-                </button>
-              </div>
-
-              {/* Quick stat grid */}
-              <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12,marginBottom:16}}>
-                {[
-                  {label:'Devices',     val:stats?.devices||0,       icon:'bi-phone-fill',       color:'#25d366'},
-                  {label:'Received',    val:stats?.received||0,      icon:'bi-chat-dots-fill',   color:'#3b82f6'},
-                  {label:'Sent',        val:stats?.sent||0,          icon:'bi-send-fill',        color:'var(--accent)'},
-                ].map(s=>(
-                  <div key={s.label} style={{padding:'12px 14px',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:10,textAlign:'center'}}>
-                    <i className={`bi ${s.icon}`} style={{fontSize:18,color:s.color,marginBottom:4,display:'block'}} />
-                    <div style={{fontSize:18,fontWeight:900,color:'var(--text)'}}>{s.val}</div>
-                    <div style={{fontSize:10,color:'var(--text3)',fontWeight:600}}>{s.label}</div>
-                  </div>
-                ))}
-              </div>
-
-              <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
-                <button onClick={()=>setTab('devices')} className="btn-success btn-sm" style={{gap:6}}>
-                  <i className="bi bi-phone-fill" style={{fontSize:12}} />Manage Devices
-                </button>
-                <button onClick={()=>setTab('messages')} className="btn-primary btn-sm" style={{gap:6}}>
-                  <i className="bi bi-chat-dots-fill" style={{fontSize:12}} />Messages
-                </button>
-                <button onClick={()=>setTab('send')} className="btn-secondary btn-sm" style={{gap:6}}>
-                  <i className="bi bi-send-fill" style={{fontSize:12}} />Send
-                </button>
-                <button onClick={()=>setTab('broadcast')} className="btn-secondary btn-sm" style={{gap:6}}>
-                  <i className="bi bi-broadcast-pin" style={{fontSize:12}} />Broadcast
-                </button>
-              </div>
-            </div>
-          )}
-
-          <div className="alert alert-info">
-            <i className="bi bi-info-circle-fill" />
-            <div>
-              <strong>DL SMS Client WhatsApp Integration</strong> — link an iVASMS number, register your devices (Samsung Galaxy S25 Ultra, Pixel 9, iPhone 16, etc.) and monitor messages in real-time. Broadcast and send functionality works on Cloudflare edge.
             </div>
           </div>
-        </div>
-      )}
 
-      {/* ── DEVICES ── */}
-      {tab==='devices' && (
-        <div style={{display:'flex',flexDirection:'column',gap:16}}>
-          <div className="card" style={{padding:0,overflow:'hidden'}}>
-            <div style={{padding:'14px 20px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10}}>
-              <i className="bi bi-phone-fill" style={{color:'#25d366',fontSize:15}} />
-              <span style={{fontSize:13,fontWeight:700,color:'var(--text)',flex:1}}>Registered Devices</span>
-              <button onClick={load} className="btn-ghost btn-sm" style={{gap:5}}>
-                <i className="bi bi-arrow-repeat" style={{fontSize:13}} />Refresh
-              </button>
-              {connected && (
-                <button onClick={()=>setShowAddDev(v=>!v)} className="btn-success btn-sm" style={{gap:5}}>
-                  <i className="bi bi-plus-circle-fill" style={{fontSize:12}} />Add Device
-                </button>
-              )}
-            </div>
-
-            {/* Add device form */}
-            {showAddDev && (
-              <div style={{padding:'16px 20px',borderBottom:'1px solid var(--border)',background:'rgba(37,211,102,.03)'}}>
-                <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12,marginBottom:12}}>
-                  <div className="form-group" style={{margin:0}}>
-                    <label className="form-label">Device Model</label>
-                    <select value={devModel} onChange={e=>setDevModel(e.target.value)}>
-                      <option value="">— Select model —</option>
-                      {KNOWN_DEVICES.map(d=>(
-                        <option key={d.model} value={d.model}>{d.icon} {d.model}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <div className="form-group" style={{margin:0}}>
-                    <label className="form-label">Custom Name (optional)</label>
-                    <input value={devName} onChange={e=>setDevName(e.target.value)} placeholder="e.g. My Work Phone" />
-                  </div>
+          {/* Right — Chat thread */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: '#0b141a' }}>
+            {!activeContact ? (
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: '#8696a0' }}>
+                <div style={{ fontSize: 72, marginBottom: 20 }}>💬</div>
+                <div style={{ fontSize: 22, fontWeight: 600, marginBottom: 10, color: '#e9edef' }}>DL Chat — WhatsApp</div>
+                <div style={{ fontSize: 14, textAlign: 'center', maxWidth: 320, lineHeight: 1.6 }}>
+                  Select a contact from the left to open a conversation.<br />
+                  Add contacts by their WhatsApp phone number.
                 </div>
-                <div className="form-group" style={{margin:'0 0 12px'}}>
-                  <label className="form-label">Phone Number (optional)</label>
-                  <input value={devPhone} onChange={e=>setDevPhone(e.target.value)} placeholder={status?.number||'+1234567890'} />
-                </div>
-                <div style={{display:'flex',gap:8}}>
-                  <button onClick={addDevice} disabled={addingDev||!devModel} className="btn-success btn-sm" style={{gap:6}}>
-                    <i className="bi bi-plus-circle-fill" style={{fontSize:12}} />
-                    {addingDev?'Registering…':'Register Device'}
-                  </button>
-                  <button onClick={()=>setShowAddDev(false)} className="btn-ghost btn-sm">Cancel</button>
-                </div>
-              </div>
-            )}
-
-            {!connected ? (
-              <div style={{padding:40,textAlign:'center',color:'var(--text3)'}}>
-                <i className="bi bi-phone-fill" style={{fontSize:40,display:'block',marginBottom:12,opacity:.2}} />
-                Link a WhatsApp number first to register devices.
-              </div>
-            ) : devices.length===0 ? (
-              <div style={{padding:40,textAlign:'center',color:'var(--text3)'}}>
-                <i className="bi bi-phone-fill" style={{fontSize:40,display:'block',marginBottom:12,opacity:.2}} />
-                <div style={{fontSize:14,fontWeight:600,marginBottom:8}}>No devices registered</div>
-                <div style={{fontSize:12}}>Click "Add Device" to register your Samsung, Pixel, iPhone, etc.</div>
               </div>
             ) : (
-              <div style={{padding:16,display:'flex',flexDirection:'column',gap:10}}>
-                {devices.map((dev:any)=>{
-                  const preset = KNOWN_DEVICES.find(d=>d.model===dev.model)||KNOWN_DEVICES[KNOWN_DEVICES.length-1]
-                  return (
-                    <div key={dev.id} style={{
-                      display:'flex',alignItems:'center',gap:14,padding:'14px 16px',
-                      background:'var(--bg)',border:'1px solid var(--border)',borderRadius:12,
-                      transition:'border-color .15s',
-                    }}
-                      onMouseEnter={e=>(e.currentTarget.style.borderColor='rgba(37,211,102,.25)')}
-                      onMouseLeave={e=>(e.currentTarget.style.borderColor='var(--border)')}>
-                      {/* Device icon */}
-                      <div style={{
-                        width:44,height:44,borderRadius:12,
-                        background:`${preset.color}18`,
-                        border:`1.5px solid ${preset.color}40`,
-                        display:'flex',alignItems:'center',justifyContent:'center',
-                        fontSize:22,flexShrink:0,
-                      }}>
-                        {dev.icon||preset.icon}
-                      </div>
-                      <div style={{flex:1,minWidth:0}}>
-                        <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:3}}>
-                          <span style={{fontSize:13,fontWeight:700,color:'var(--text)'}}>{dev.name||dev.model}</span>
-                          <span style={{
-                            fontSize:9,fontWeight:800,padding:'2px 6px',borderRadius:5,
-                            background:dev.status==='connected'?'rgba(37,211,102,.15)':'rgba(255,255,255,.06)',
-                            color:dev.status==='connected'?'var(--green)':'var(--text3)',
-                            textTransform:'uppercase',letterSpacing:.5,
-                          }}>{dev.status||'connected'}</span>
-                        </div>
-                        <div style={{display:'flex',gap:12,flexWrap:'wrap'}}>
-                          <span style={{fontSize:11,color:'var(--text3)',display:'flex',alignItems:'center',gap:4}}>
-                            <DeviceBrandIcon brand={dev.brand} size={11} />{dev.brand} · {dev.os}
-                          </span>
-                          {dev.phone && (
-                            <span style={{fontSize:11,color:'var(--text3)',display:'flex',alignItems:'center',gap:4}}>
-                              <i className="bi bi-telephone-fill" style={{fontSize:10}} />{dev.phone}
-                            </span>
-                          )}
-                          <span style={{fontSize:11,color:'var(--text3)',display:'flex',alignItems:'center',gap:4}}>
-                            <i className="bi bi-clock-fill" style={{fontSize:10}} />{fmtTime(dev.lastSeen)}
-                          </span>
-                          {dev.ipAddress && dev.ipAddress!=='unknown' && (
-                            <span style={{fontSize:11,color:'var(--text3)',display:'flex',alignItems:'center',gap:4}}>
-                              <i className="bi bi-globe" style={{fontSize:10}} />{dev.ipAddress}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                      <div style={{display:'flex',gap:6,flexShrink:0}}>
-                        {dev.batteryPct!==null&&dev.batteryPct!==undefined&&(
-                          <span style={{fontSize:10,fontWeight:700,color:'var(--green)',padding:'3px 7px',background:'rgba(0,230,118,.1)',borderRadius:5,display:'flex',alignItems:'center',gap:3}}>
-                            <i className="bi bi-battery-half" style={{fontSize:11}} />{dev.batteryPct}%
-                          </span>
-                        )}
-                        <button onClick={()=>removeDevice(dev.id)} className="btn-danger btn-sm" title="Remove device" style={{padding:'4px 8px'}}>
-                          <i className="bi bi-trash" style={{fontSize:12}} />
-                        </button>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Supported devices reference */}
-          <div className="card">
-            <h3 style={{fontSize:13,fontWeight:700,color:'var(--text)',marginBottom:14,display:'flex',alignItems:'center',gap:8}}>
-              <i className="bi bi-phone-fill" style={{color:'#25d366',fontSize:13}} />
-              Supported Device Models
-            </h3>
-            <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:8}}>
-              {KNOWN_DEVICES.filter(d=>d.model!=='Custom / Other').map(d=>(
-                <div key={d.model} style={{display:'flex',alignItems:'center',gap:8,padding:'8px 10px',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8}}>
-                  <span style={{fontSize:16}}>{d.icon}</span>
+              <>
+                {/* Chat header */}
+                <div style={{ padding: '12px 20px', background: '#202c33', display: 'flex', alignItems: 'center', borderBottom: '1px solid #2a3942' }}>
+                  <div style={{
+                    width: 40, height: 40, borderRadius: '50%', background: colorFor(activeContact.name),
+                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, color: '#fff', marginRight: 12,
+                  }}>{initials(activeContact.name)}</div>
                   <div>
-                    <div style={{fontSize:11,fontWeight:700,color:'var(--text)'}}>{d.model}</div>
-                    <div style={{fontSize:10,color:'var(--text3)'}}>{d.os}</div>
+                    <div style={{ fontWeight: 600, fontSize: 15 }}>{activeContact.name}</div>
+                    <div style={{ fontSize: 12, color: '#8696a0' }}>{activeContact.phone}</div>
                   </div>
+                  <button onClick={() => setActiveContact(null)} style={{
+                    marginLeft: 'auto', background: 'transparent', border: 'none', color: '#8696a0',
+                    cursor: 'pointer', fontSize: 20,
+                  }}>✕</button>
                 </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
-      {/* ── MESSAGES ── */}
-      {tab==='messages' && (
-        <div className="card" style={{padding:0,overflow:'hidden'}}>
-          <div style={{padding:'14px 20px',borderBottom:'1px solid var(--border)',display:'flex',alignItems:'center',gap:10}}>
-            <i className="bi bi-chat-dots-fill" style={{color:'#25d366',fontSize:15}} />
-            <span style={{fontSize:13,fontWeight:700,color:'var(--text)',flex:1}}>
-              Messages {connected?`for ${status?.number}`:'— Not connected'}
-            </span>
-            <button onClick={load} className="btn-ghost btn-sm" style={{gap:5}}>
-              <i className="bi bi-arrow-repeat" style={{fontSize:13}} />Refresh
-            </button>
-          </div>
-          {!connected?(
-            <div style={{padding:40,textAlign:'center',color:'var(--text3)'}}>
-              <i className="bi bi-whatsapp" style={{fontSize:40,display:'block',marginBottom:12,opacity:.2}} />
-              Link a WhatsApp number first to see messages.
-            </div>
-          ):messages.length===0?(
-            <div style={{padding:40,textAlign:'center',color:'var(--text3)'}}>
-              <i className="bi bi-chat-dots-fill" style={{fontSize:36,display:'block',marginBottom:12,opacity:.2}} />
-              No messages yet. Sync iVASMS to load SMS for this number.
-            </div>
-          ):(
-            <div style={{padding:16,display:'flex',flexDirection:'column',gap:10,maxHeight:500,overflowY:'auto'}}>
-              {messages.map((m:any)=>(
-                <div key={m.id} className="sms-item" style={{borderLeft:`3px solid #25d366`}}>
-                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:5}}>
-                    <i className="bi bi-person-circle" style={{color:'#25d366',fontSize:14}} />
-                    <span style={{fontSize:12,fontWeight:600,color:'var(--text2)'}}>{m.sender}</span>
-                    {m.otp&&<span style={{background:'rgba(37,211,102,.12)',color:'#25d366',fontWeight:700,fontSize:12,padding:'2px 8px',borderRadius:5,fontFamily:'monospace',letterSpacing:2}}>{m.otp}</span>}
-                    <span style={{marginLeft:'auto',fontSize:10,color:'var(--text3)'}}>{fmtTime(m.received_at)}</span>
-                  </div>
-                  <p style={{fontSize:12,color:'var(--text2)',lineHeight:1.5,margin:0}}>{m.body}</p>
-                  {m.service&&m.service!=='Unknown'&&(
-                    <div style={{marginTop:5}}>
-                      <span style={{fontSize:10,color:'var(--text3)',background:'var(--bg)',padding:'2px 7px',borderRadius:5,border:'1px solid var(--border)'}}>{m.service}</span>
+                {/* Messages */}
+                <div style={{ flex: 1, overflowY: 'auto', padding: '16px 60px', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {loadingThread ? (
+                    <div style={{ textAlign: 'center', color: '#8696a0', marginTop: 40 }}>Loading messages…</div>
+                  ) : thread.length === 0 ? (
+                    <div style={{ textAlign: 'center', color: '#8696a0', marginTop: 60 }}>
+                      <div style={{ fontSize: 40, marginBottom: 12 }}>🔒</div>
+                      <div>No messages yet. Send the first message below.</div>
                     </div>
+                  ) : (
+                    thread.map(msg => {
+                      const isMe = msg.from === 'me'
+                      return (
+                        <div key={msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
+                          <div style={{
+                            maxWidth: '65%', padding: '8px 12px 4px',
+                            background: isMe ? '#005c4b' : '#202c33',
+                            borderRadius: isMe ? '12px 12px 2px 12px' : '12px 12px 12px 2px',
+                            color: '#e9edef', fontSize: 14, lineHeight: 1.5,
+                          }}>
+                            <div style={{ wordBreak: 'break-word' }}>{msg.body}</div>
+                            <div style={{ fontSize: 11, color: '#8696a0', textAlign: 'right', marginTop: 4 }}>
+                              {fmtTime(msg.sent_at)}
+                              {isMe && <span style={{ marginLeft: 4 }}>
+                                {msg.status === 'sent' ? ' ✓' : ' ✓✓'}
+                              </span>}
+                            </div>
+                          </div>
+                        </div>
+                      )
+                    })
                   )}
+                  <div ref={bottomRef} />
+                </div>
+
+                {/* Message input */}
+                <div style={{ padding: '12px 20px', background: '#202c33', display: 'flex', gap: 10, alignItems: 'center' }}>
+                  <input
+                    value={msgInput}
+                    onChange={e => setMsgInput(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }}
+                    placeholder="Type a message…"
+                    style={{
+                      flex: 1, background: '#2a3942', border: 'none', borderRadius: 20,
+                      padding: '10px 16px', color: '#e9edef', fontSize: 15, outline: 'none',
+                    }}
+                  />
+                  <button onClick={sendMessage} disabled={sendingMsg || !msgInput.trim()} style={{
+                    background: '#00a884', border: 'none', borderRadius: '50%',
+                    width: 44, height: 44, cursor: 'pointer', fontSize: 20,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    opacity: msgInput.trim() ? 1 : 0.5,
+                  }}>➤</button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── DEVICES TAB ── */}
+      {tab === 'devices' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: 24 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 20, fontWeight: 700 }}>📱 Linked Devices</h2>
+              <p style={{ margin: '4px 0 0', color: '#8696a0', fontSize: 13 }}>Real devices connected to your WhatsApp account</p>
+            </div>
+            <button onClick={() => setShowDeviceModal(true)} style={{
+              background: '#00a884', color: '#fff', border: 'none', borderRadius: 8,
+              padding: '10px 20px', cursor: 'pointer', fontWeight: 600,
+            }}>+ Link Device</button>
+          </div>
+
+          {loadingDevices ? (
+            <div style={{ textAlign: 'center', color: '#8696a0', padding: 60 }}>Loading devices…</div>
+          ) : devices.length === 0 ? (
+            <div style={{ textAlign: 'center', color: '#8696a0', padding: 60 }}>
+              <div style={{ fontSize: 64, marginBottom: 16 }}>📱</div>
+              <div style={{ fontWeight: 600, fontSize: 18, marginBottom: 8 }}>No devices linked</div>
+              <div style={{ fontSize: 14 }}>Link a real device to start receiving WhatsApp messages</div>
+              <button onClick={() => setShowDeviceModal(true)} style={{
+                marginTop: 16, background: '#00a884', color: '#fff', border: 'none',
+                borderRadius: 8, padding: '10px 20px', cursor: 'pointer', fontWeight: 600,
+              }}>+ Link First Device</button>
+            </div>
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 16 }}>
+              {devices.map(d => (
+                <div key={d.id} style={{
+                  background: '#202c33', borderRadius: 12, padding: 20,
+                  border: `1px solid ${d.status === 'connected' ? '#00a884' : '#2a3942'}`,
+                }}>
+                  <div style={{ display: 'flex', alignItems: 'center', marginBottom: 14 }}>
+                    <span style={{ fontSize: 32, marginRight: 12 }}>{d.icon || '📱'}</span>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 15 }}>{d.name}</div>
+                      <div style={{ fontSize: 12, color: '#8696a0' }}>{d.model}</div>
+                    </div>
+                    <span style={{
+                      marginLeft: 'auto', padding: '3px 10px', borderRadius: 12, fontSize: 11, fontWeight: 600,
+                      background: d.status === 'connected' ? '#00a88422' : '#2a3942',
+                      color: d.status === 'connected' ? '#00a884' : '#8696a0',
+                    }}>{d.status}</span>
+                  </div>
+                  <div style={{ fontSize: 12, color: '#8696a0', lineHeight: 1.8 }}>
+                    <div>📞 {d.phone || 'No phone set'}</div>
+                    <div>💻 {d.os}</div>
+                    <div>🕐 Last seen: {fmtTime(d.lastSeen)}</div>
+                    {d.batteryPct != null && <div>🔋 Battery: {d.batteryPct}%</div>}
+                  </div>
+                  <button onClick={() => removeDevice(d.id)} style={{
+                    marginTop: 14, background: '#ff4444', color: '#fff', border: 'none',
+                    borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 12, width: '100%',
+                  }}>Disconnect</button>
                 </div>
               ))}
             </div>
@@ -569,84 +521,225 @@ export default function WhatsAppPage() {
         </div>
       )}
 
-      {/* ── SEND ── */}
-      {tab==='send' && (
-        <div className="card" style={{maxWidth:540}}>
-          <h3 style={{fontSize:15,fontWeight:700,color:'var(--text)',marginBottom:18,display:'flex',alignItems:'center',gap:8}}>
-            <i className="bi bi-send-fill" style={{color:'#25d366',fontSize:14}} />Send WhatsApp Message
-          </h3>
-          {!connected&&(
-            <div className="alert alert-warn" style={{marginBottom:16}}>
-              <i className="bi bi-exclamation-triangle-fill" />Link a WhatsApp number first before sending messages.
+      {/* ── BROADCAST TAB ── */}
+      {tab === 'broadcast' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: 24, maxWidth: 700 }}>
+          <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700 }}>📢 Broadcast Message</h2>
+          <p style={{ margin: '0 0 24px', color: '#8696a0', fontSize: 13 }}>Send a message to multiple WhatsApp numbers at once</p>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', marginBottom: 6, fontWeight: 600, fontSize: 14 }}>
+              Recipients (one per line or comma-separated)
+            </label>
+            <textarea
+              value={broadcastTargets}
+              onChange={e => setBroadcastTargets(e.target.value)}
+              rows={5}
+              placeholder={'+1234567890\n+0987654321\n...'}
+              style={{
+                width: '100%', background: '#202c33', border: '1px solid #2a3942',
+                borderRadius: 8, padding: 12, color: '#e9edef', fontSize: 14,
+                resize: 'vertical', boxSizing: 'border-box', outline: 'none',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', marginBottom: 6, fontWeight: 600, fontSize: 14 }}>Message</label>
+            <textarea
+              value={broadcastMsg}
+              onChange={e => setBroadcastMsg(e.target.value)}
+              rows={4}
+              placeholder="Type your message here…"
+              style={{
+                width: '100%', background: '#202c33', border: '1px solid #2a3942',
+                borderRadius: 8, padding: 12, color: '#e9edef', fontSize: 14,
+                resize: 'vertical', boxSizing: 'border-box', outline: 'none',
+              }}
+            />
+          </div>
+
+          <button onClick={doBroadcast} disabled={broadcasting} style={{
+            background: '#00a884', color: '#fff', border: 'none', borderRadius: 8,
+            padding: '12px 28px', cursor: 'pointer', fontWeight: 700, fontSize: 15,
+            opacity: broadcasting ? 0.7 : 1,
+          }}>{broadcasting ? 'Sending…' : '📢 Send Broadcast'}</button>
+
+          {broadcastResult && (
+            <div style={{
+              marginTop: 20, background: '#202c33', borderRadius: 10, padding: 16,
+              border: '1px solid #2a3942',
+            }}>
+              <div style={{ fontWeight: 600, marginBottom: 8 }}>
+                ✅ Broadcast sent — {broadcastResult.sent} recipients queued
+              </div>
+              {Array.isArray(broadcastResult.results) && broadcastResult.results.slice(0, 5).map((r: any, i: number) => (
+                <div key={i} style={{ fontSize: 12, color: '#8696a0', padding: '2px 0' }}>
+                  {r.to} → <span style={{ color: r.status === 'queued' ? '#00a884' : '#ff4444' }}>{r.status}</span>
+                </div>
+              ))}
             </div>
           )}
-          <div className="form-group" style={{marginBottom:14}}>
-            <label className="form-label">To (phone number)</label>
-            <div className="input-group">
-              <i className="bi bi-telephone-fill input-icon" />
-              <input value={sendTo} onChange={e=>setSendTo(e.target.value)} placeholder="+1234567890" />
-            </div>
-          </div>
-          <div className="form-group" style={{marginBottom:16}}>
-            <label className="form-label">Message</label>
-            <textarea value={sendMsg} onChange={e=>setSendMsg(e.target.value)} placeholder="Type your message…" style={{minHeight:100}} />
-          </div>
-          <button onClick={sendMessage} disabled={sending||!connected||!sendTo||!sendMsg.trim()} className="btn-success" style={{gap:8}}>
-            <i className="bi bi-send-fill" style={{fontSize:14}} />
-            {sending?'Sending…':'Send Message'}
-          </button>
         </div>
       )}
 
-      {/* ── BROADCAST ── */}
-      {tab==='broadcast' && (
-        <div style={{display:'flex',flexDirection:'column',gap:16}}>
-          <div className="card" style={{maxWidth:600}}>
-            <h3 style={{fontSize:15,fontWeight:700,color:'var(--text)',marginBottom:6,display:'flex',alignItems:'center',gap:8}}>
-              <i className="bi bi-broadcast-pin" style={{color:'#25d366',fontSize:14}} />WhatsApp Broadcast
-            </h3>
-            <p style={{fontSize:12,color:'var(--text3)',marginBottom:18}}>Send a message to multiple recipients at once (max 100).</p>
-            {!connected&&(
-              <div className="alert alert-warn" style={{marginBottom:16}}>
-                <i className="bi bi-exclamation-triangle-fill" />Link a WhatsApp number first.
+      {/* ── QUICK SEND TAB ── */}
+      {tab === 'send' && (
+        <div style={{ flex: 1, overflowY: 'auto', padding: 24, maxWidth: 600 }}>
+          <h2 style={{ margin: '0 0 6px', fontSize: 20, fontWeight: 700 }}>✉️ Quick Send</h2>
+          <p style={{ margin: '0 0 24px', color: '#8696a0', fontSize: 13 }}>Send a single WhatsApp message to any number</p>
+
+          <div style={{ marginBottom: 16 }}>
+            <label style={{ display: 'block', marginBottom: 6, fontWeight: 600, fontSize: 14 }}>To (phone number)</label>
+            <input
+              value={quickTo}
+              onChange={e => setQuickTo(e.target.value)}
+              placeholder="+1234567890"
+              style={{
+                width: '100%', background: '#202c33', border: '1px solid #2a3942',
+                borderRadius: 8, padding: '10px 14px', color: '#e9edef', fontSize: 14,
+                boxSizing: 'border-box', outline: 'none',
+              }}
+            />
+          </div>
+
+          <div style={{ marginBottom: 20 }}>
+            <label style={{ display: 'block', marginBottom: 6, fontWeight: 600, fontSize: 14 }}>Message</label>
+            <textarea
+              value={quickMsg}
+              onChange={e => setQuickMsg(e.target.value)}
+              rows={4}
+              placeholder="Type your message…"
+              style={{
+                width: '100%', background: '#202c33', border: '1px solid #2a3942',
+                borderRadius: 8, padding: 12, color: '#e9edef', fontSize: 14,
+                resize: 'vertical', boxSizing: 'border-box', outline: 'none',
+              }}
+            />
+          </div>
+
+          <button onClick={doQuickSend} disabled={quickSending} style={{
+            background: '#00a884', color: '#fff', border: 'none', borderRadius: 8,
+            padding: '12px 28px', cursor: 'pointer', fontWeight: 700, fontSize: 15,
+            opacity: quickSending ? 0.7 : 1,
+          }}>{quickSending ? 'Sending…' : '✉️ Send Message'}</button>
+
+          {quickResult && (
+            <div style={{
+              marginTop: 20, background: '#202c33', borderRadius: 10, padding: 16,
+              border: `1px solid ${quickResult.ok ? '#00a884' : '#ff4444'}`,
+            }}>
+              {quickResult.ok
+                ? <span style={{ color: '#00a884', fontWeight: 600 }}>✅ Message sent to {quickResult.message?.to}</span>
+                : <span style={{ color: '#ff4444' }}>❌ {quickResult.error || 'Send failed'}</span>
+              }
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── ADD CONTACT MODAL ── */}
+      {showAddContact && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+        }} onClick={e => { if (e.target === e.currentTarget) setShowAddContact(false) }}>
+          <div style={{ background: '#202c33', borderRadius: 14, padding: 28, width: 380, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+            <h3 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700 }}>Add WhatsApp Contact</h3>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#8696a0' }}>Name (optional)</label>
+              <input
+                value={addName}
+                onChange={e => setAddName(e.target.value)}
+                placeholder="e.g. John Doe"
+                style={{
+                  width: '100%', background: '#111b21', border: '1px solid #2a3942',
+                  borderRadius: 8, padding: '10px 14px', color: '#e9edef', fontSize: 14,
+                  boxSizing: 'border-box', outline: 'none',
+                }}
+              />
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#8696a0' }}>Phone Number *</label>
+              <input
+                value={addPhone}
+                onChange={e => setAddPhone(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') addContact() }}
+                placeholder="+1234567890 (with country code)"
+                style={{
+                  width: '100%', background: '#111b21', border: '1px solid #2a3942',
+                  borderRadius: 8, padding: '10px 14px', color: '#e9edef', fontSize: 14,
+                  boxSizing: 'border-box', outline: 'none',
+                }}
+              />
+            </div>
+
+            {addError && (
+              <div style={{ marginBottom: 14, color: '#ff4444', fontSize: 13, background: '#ff444411', padding: '8px 12px', borderRadius: 6 }}>
+                {addError}
               </div>
             )}
-            <div className="form-group" style={{marginBottom:14}}>
-              <label className="form-label">Recipients (one per line or comma-separated)</label>
-              <textarea value={broadTargets} onChange={e=>setBroadTargets(e.target.value)} placeholder={"+1234567890\n+9876543210\n..."} style={{minHeight:100,fontFamily:'monospace',fontSize:12}} />
-              {broadTargets.trim()&&(
-                <div style={{fontSize:11,color:'var(--text3)',marginTop:4}}>
-                  {broadTargets.split(/[\n,]+/).map(s=>s.trim()).filter(Boolean).length} recipients
-                </div>
-              )}
-            </div>
-            <div className="form-group" style={{marginBottom:16}}>
-              <label className="form-label">Message</label>
-              <textarea value={broadMsg} onChange={e=>setBroadMsg(e.target.value)} placeholder="Your broadcast message…" style={{minHeight:80}} />
-            </div>
-            <button onClick={sendBroadcast} disabled={broadcasting||!connected||!broadTargets.trim()||!broadMsg.trim()} className="btn-success" style={{gap:8}}>
-              <i className="bi bi-broadcast-pin" style={{fontSize:14}} />
-              {broadcasting?'Broadcasting…':'Send Broadcast'}
-            </button>
-          </div>
 
-          {/* Broadcast history */}
-          {broadHist.length>0&&(
-            <div className="card" style={{padding:0,overflow:'hidden'}}>
-              <div style={{padding:'12px 16px',borderBottom:'1px solid var(--border)',fontSize:12,fontWeight:700,color:'var(--text3)'}}>BROADCAST HISTORY</div>
-              <div style={{padding:12,display:'flex',flexDirection:'column',gap:8,maxHeight:300,overflowY:'auto'}}>
-                {broadHist.map((h:any)=>(
-                  <div key={h.id} style={{padding:'10px 14px',background:'var(--bg)',border:'1px solid var(--border)',borderRadius:8}}>
-                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
-                      <span style={{fontSize:11,fontWeight:700,color:'var(--text)'}}>{h.count} recipients</span>
-                      <span style={{fontSize:10,color:'var(--text3)',marginLeft:'auto'}}>{fmtTime(h.ts)}</span>
-                    </div>
-                    <div style={{fontSize:11,color:'var(--text3)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{h.message}</div>
-                  </div>
-                ))}
-              </div>
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => { setShowAddContact(false); setAddError('') }} style={{
+                flex: 1, background: '#2a3942', color: '#e9edef', border: 'none',
+                borderRadius: 8, padding: '11px', cursor: 'pointer', fontWeight: 600,
+              }}>Cancel</button>
+              <button onClick={addContact} disabled={addingContact} style={{
+                flex: 1, background: '#00a884', color: '#fff', border: 'none',
+                borderRadius: 8, padding: '11px', cursor: 'pointer', fontWeight: 700,
+                opacity: addingContact ? 0.7 : 1,
+              }}>{addingContact ? 'Adding…' : 'Add Contact'}</button>
             </div>
-          )}
+          </div>
+        </div>
+      )}
+
+      {/* ── LINK DEVICE MODAL ── */}
+      {showDeviceModal && (
+        <div style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)',
+          display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 9999,
+        }} onClick={e => { if (e.target === e.currentTarget) setShowDeviceModal(false) }}>
+          <div style={{ background: '#202c33', borderRadius: 14, padding: 28, width: 420, boxShadow: '0 20px 60px rgba(0,0,0,0.5)' }}>
+            <h3 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700 }}>📱 Link a Device</h3>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#8696a0' }}>Device Name</label>
+              <input value={devName} onChange={e => setDevName(e.target.value)} placeholder="My Phone"
+                style={{ width: '100%', background: '#111b21', border: '1px solid #2a3942', borderRadius: 8, padding: '10px 14px', color: '#e9edef', fontSize: 14, boxSizing: 'border-box', outline: 'none' }} />
+            </div>
+
+            <div style={{ marginBottom: 14 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#8696a0' }}>Model</label>
+              <select value={devModel} onChange={e => setDevModel(e.target.value)} style={{
+                width: '100%', background: '#111b21', border: '1px solid #2a3942',
+                borderRadius: 8, padding: '10px 14px', color: '#e9edef', fontSize: 14, boxSizing: 'border-box',
+              }}>
+                {['Samsung Galaxy S25 Ultra','Samsung Galaxy S25+','iPhone 16 Pro Max','iPhone 16 Pro','iPhone 16',
+                  'Google Pixel 9 Pro XL','Google Pixel 9 Pro','Google Pixel 9','OnePlus 13','Xiaomi 15 Ultra','Custom / Other']
+                  .map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontSize: 13, color: '#8696a0' }}>WhatsApp Phone Number</label>
+              <input value={devPhone} onChange={e => setDevPhone(e.target.value)} placeholder="+1234567890"
+                style={{ width: '100%', background: '#111b21', border: '1px solid #2a3942', borderRadius: 8, padding: '10px 14px', color: '#e9edef', fontSize: 14, boxSizing: 'border-box', outline: 'none' }} />
+            </div>
+
+            <div style={{ display: 'flex', gap: 10 }}>
+              <button onClick={() => setShowDeviceModal(false)} style={{
+                flex: 1, background: '#2a3942', color: '#e9edef', border: 'none', borderRadius: 8, padding: '11px', cursor: 'pointer', fontWeight: 600,
+              }}>Cancel</button>
+              <button onClick={addDevice} disabled={addingDevice} style={{
+                flex: 1, background: '#00a884', color: '#fff', border: 'none', borderRadius: 8, padding: '11px', cursor: 'pointer', fontWeight: 700,
+                opacity: addingDevice ? 0.7 : 1,
+              }}>{addingDevice ? 'Linking…' : 'Link Device'}</button>
+            </div>
+          </div>
         </div>
       )}
     </div>
