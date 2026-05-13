@@ -585,40 +585,179 @@ export async function onRequest(context) {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // iVASMS DEBUG — returns raw HTML so we can inspect the real page structure
-    // GET /api/ivasms/debug?page=numbers|sms&numId=xxx
+    // iVASMS DEBUG — step-by-step login trace + raw HTML inspection
+    // GET /api/ivasms/debug?page=login|login2|numbers|dashboard|sms&numId=xxx
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/ivasms/debug' && method === 'GET') {
-      const debugPage = url.searchParams.get('page') || 'numbers'
+      const debugPage = url.searchParams.get('page') || 'login'
       const numId     = url.searchParams.get('numId') || ''
+      const BASE      = 'https://www.ivasms.com'
+      const UA        = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
+      const baseHdrs  = {
+        'User-Agent':                UA,
+        'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language':           'en-US,en;q=0.9',
+        'Accept-Encoding':           'gzip, deflate, br',
+        'Connection':                'keep-alive',
+        'Upgrade-Insecure-Requests': '1',
+        'Cache-Control':             'no-cache',
+        'Sec-Fetch-Dest':            'document',
+        'Sec-Fetch-Mode':            'navigate',
+        'Sec-Fetch-Site':            'none',
+      }
+      const trace = []
+
       try {
-        const sess = await ivasmsLogin(DEFAULT_IVASMS_EMAIL, DEFAULT_IVASMS_PASSWORD)
-        const BASE = 'https://www.ivasms.com'
+        // ─ Step 1: GET /login — collect ALL cookies via getAll() ─
+        const loginPageRes = await fetch(`${BASE}/login`, {
+          headers: baseHdrs, redirect: 'follow', signal: AbortSignal.timeout(25000),
+        })
+        const loginHtml = await loginPageRes.text()
+
+        // CRITICAL: use getAllSetCookies not headers.get('set-cookie')
+        const step1CookieArr = getAllSetCookies(loginPageRes)
+        let initCookies = parseCookiesArray(step1CookieArr)
+
+        // Extract form action
+        let formAction = `${BASE}/login`
+        const actionMatch = loginHtml.match(/<form[^>]+action=["']([^"']+)["'][^>]*method=["']post["']/i)
+                         || loginHtml.match(/<form[^>]+method=["']post["'][^>]+action=["']([^"']+)["']/i)
+        if (actionMatch) {
+          const a = actionMatch[1]
+          formAction = a.startsWith('http') ? a : `${BASE}${a.startsWith('/') ? '' : '/'}${a}`
+        }
+
+        // Extract CSRF token
+        const csrfPatterns = [
+          /name=["']_token["']\s+value=["']([^"']+)["']/,
+          /value=["']([^"']+)["']\s+name=["']_token["']/,
+          /<input[^>]+name=["']_token["'][^>]+value=["']([^"']+)["']/,
+          /<input[^>]+value=["']([^"']+)["'][^>]+name=["']_token["']/,
+          /<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/,
+        ]
+        let csrfToken = ''
+        for (const p of csrfPatterns) { const m = loginHtml.match(p); if (m) { csrfToken = m[1]; break } }
+
+        // Try sanctum/csrf-cookie if session missing
+        if (!initCookies.includes('laravel_session')) {
+          try {
+            const csrfRes = await fetch(`${BASE}/sanctum/csrf-cookie`, {
+              headers: { ...baseHdrs, Cookie: initCookies }, redirect: 'follow', signal: AbortSignal.timeout(12000),
+            })
+            const csrfArr = getAllSetCookies(csrfRes)
+            initCookies = mergeCookies(initCookies, parseCookiesArray(csrfArr))
+          } catch {}
+        }
+
+        // Decode XSRF-TOKEN
+        let xsrfDecoded = ''
+        const xsrfMatch = initCookies.match(/XSRF-TOKEN=([^;]+)/)
+        if (xsrfMatch) { try { xsrfDecoded = decodeURIComponent(xsrfMatch[1]) } catch {} }
+        if (!csrfToken && xsrfDecoded) csrfToken = xsrfDecoded
+
+        trace.push({
+          step: 1, label: 'GET /login',
+          status:       loginPageRes.status,
+          finalUrl:     loginPageRes.url,
+          formAction,
+          csrfFound:    !!csrfToken,
+          csrfToken:    csrfToken.slice(0, 40) + (csrfToken.length > 40 ? '…' : ''),
+          rawSetCookieHeaders: step1CookieArr,
+          initCookies:  initCookies.slice(0, 400),
+          hasSession:   initCookies.includes('laravel_session'),
+          hasXSRF:      initCookies.includes('XSRF-TOKEN'),
+          xsrfDecoded:  xsrfDecoded.slice(0, 40),
+          htmlLen:      loginHtml.length,
+          htmlPreview:  loginHtml.slice(0, 800),
+          formInputs:   [...loginHtml.matchAll(/<input[^>]+>/gi)].map(m => m[0].slice(0, 120)),
+        })
+
+        if (debugPage === 'login') return json({ trace })
+
+        // ─ Step 2: POST login with ALL correct headers ─
+        const postHdrs = {
+          ...baseHdrs,
+          'Content-Type':   'application/x-www-form-urlencoded',
+          'Cookie':          initCookies,
+          'Referer':        `${BASE}/login`,
+          'Origin':          BASE,
+          'Sec-Fetch-Site': 'same-origin',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-User': '?1',
+        }
+        if (xsrfDecoded) postHdrs['X-XSRF-TOKEN'] = xsrfDecoded
+
+        const loginRes = await fetch(formAction, {
+          method: 'POST',
+          headers: postHdrs,
+          body: new URLSearchParams({
+            email: DEFAULT_IVASMS_EMAIL,
+            password: DEFAULT_IVASMS_PASSWORD,
+            _token: csrfToken,
+            remember: 'on',
+          }).toString(),
+          redirect: 'manual',
+          signal: AbortSignal.timeout(25000),
+        })
+        const loginBody = await loginRes.text()
+
+        // CRITICAL: collect ALL cookies from POST response
+        const step2CookieArr = getAllSetCookies(loginRes)
+        const step2CookieStr = parseCookiesArray(step2CookieArr)
+        const sessionCookies = mergeCookies(initCookies, step2CookieStr)
+        const location2      = loginRes.headers.get('location') || ''
+
+        trace.push({
+          step: 2, label: 'POST /login',
+          status:           loginRes.status,
+          location:         location2,
+          isLoginRedirect:  location2.includes('/login'),
+          rawSetCookieHeaders: step2CookieArr,
+          step2CookieStr:   step2CookieStr.slice(0, 300),
+          sessionCookies:   sessionCookies.slice(0, 300),
+          hasSession:       sessionCookies.includes('laravel_session'),
+          bodyLen:          loginBody.length,
+          bodyPreview:      loginBody.slice(0, 400),
+          credentialsUsed:  { email: DEFAULT_IVASMS_EMAIL, passLen: DEFAULT_IVASMS_PASSWORD.length },
+        })
+
+        if (debugPage === 'login2') return json({ trace })
+
+        // ─ Step 3: GET the target page ─
+        const sessionHdrs = {
+          ...baseHdrs,
+          Cookie:  sessionCookies,
+          Referer: `${BASE}/portal/dashboard`,
+          'Sec-Fetch-Site': 'same-origin',
+        }
         let targetUrl = `${BASE}/portal/numbers`
+        if (debugPage === 'dashboard') targetUrl = `${BASE}/portal/dashboard`
+        if (debugPage === 'profile')   targetUrl = `${BASE}/portal/profile`
         if (debugPage === 'sms' && numId) targetUrl = `${BASE}/portal/numbers/${numId}/sms`
-        if (debugPage === 'dashboard')    targetUrl = `${BASE}/portal/dashboard`
-        if (debugPage === 'profile')      targetUrl = `${BASE}/portal/profile`
-        const r = await fetch(targetUrl, {
-          headers: { ...sess.headers, Cookie: sess.cookies },
-          redirect: 'follow',
-          signal: AbortSignal.timeout(20000),
+
+        const pageRes  = await fetch(targetUrl, { headers: sessionHdrs, redirect: 'follow', signal: AbortSignal.timeout(25000) })
+        const pageHtml = await pageRes.text()
+
+        const phones  = [...pageHtml.matchAll(/(\+[\d]{7,15})/g)].map(m => m[1]).slice(0, 50)
+        const ivasIds = [...pageHtml.matchAll(/\/numbers\/(\d+)/g)].map(m => m[1]).slice(0, 50)
+        const rows    = [...pageHtml.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].length
+        const links   = [...pageHtml.matchAll(/href="([^"]+)"/g)].map(m => m[1]).filter(l => l.includes('portal')).slice(0, 30)
+        const tables  = [...pageHtml.matchAll(/<table[^>]*>/gi)].length
+
+        trace.push({
+          step: 3, label: `GET ${targetUrl}`,
+          status:     pageRes.status,
+          finalUrl:   pageRes.url,
+          redirected: pageRes.redirected,
+          isLoginPage: pageRes.url?.includes('/login') || /<title>[^<]*[Ll]ogin[^<]*<\/title>/.test(pageHtml),
+          htmlLen:    pageHtml.length,
+          htmlPreview: pageHtml.slice(0, 3000),
+          analysis: { phones, ivasIds, tableRows: rows, tables, portalLinks: links },
         })
-        const html = await r.text()
-        // Return first 8000 chars of HTML + snippet analysis
-        const phones   = [...html.matchAll(/(\+[\d]{7,15})/g)].map(m => m[1]).slice(0, 30)
-        const ivasIds  = [...html.matchAll(/\/numbers\/(\d+)/g)].map(m => m[1]).slice(0, 30)
-        const rows     = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].length
-        const links    = [...html.matchAll(/href="([^"]+)"/g)].map(m => m[1]).filter(l => l.includes('portal')).slice(0, 20)
-        return json({
-          url: targetUrl,
-          status: r.status,
-          redirected: r.redirected,
-          htmlLength: html.length,
-          htmlPreview: html.slice(0, 6000),
-          analysis: { phones, ivasIds, tableRows: rows, portalLinks: links },
-        })
+
+        return json({ trace })
       } catch (e) {
-        return json({ error: e.message }, 500)
+        return json({ error: e.message, trace }, 500)
       }
     }
 
@@ -2552,37 +2691,56 @@ export async function onRequest(context) {
 
 // ─── iVASMS Login Helper ───────────────────────────────────────────────────
 async function ivasmsLogin(email, password) {
+  // KEY FIX: Cloudflare Workers response.headers.get('set-cookie') only returns
+  // the FIRST Set-Cookie header. Laravel sends laravel_session in a SEPARATE
+  // header. We MUST use getAllSetCookies() to capture ALL cookies.
   const BASE = 'https://www.ivasms.com'
   const UA   = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   const baseHeaders = {
-    'User-Agent':      UA,
-    'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-    'Accept-Language': 'en-US,en;q=0.9',
-    'Accept-Encoding': 'gzip, deflate, br',
-    'Connection':      'keep-alive',
+    'User-Agent':                UA,
+    'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language':           'en-US,en;q=0.9',
+    'Accept-Encoding':           'gzip, deflate, br',
+    'Connection':                'keep-alive',
     'Upgrade-Insecure-Requests': '1',
-    'Sec-Fetch-Dest':  'document',
-    'Sec-Fetch-Mode':  'navigate',
-    'Sec-Fetch-Site':  'none',
-    'Cache-Control':   'max-age=0',
+    'Sec-Fetch-Dest':            'document',
+    'Sec-Fetch-Mode':            'navigate',
+    'Sec-Fetch-Site':            'none',
+    'Cache-Control':             'max-age=0',
   }
 
-  // Step 1 — GET login page for CSRF + session cookie
-  let csrfToken   = ''
-  let initCookies = ''
+  // ── Step 1: GET login page — collect ALL cookies via getAll() ─────────────
+  let csrfToken  = ''
+  let formAction = `${BASE}/login`
+
   const loginPageRes = await fetch(`${BASE}/login`, {
-    headers: baseHeaders,
-    redirect: 'follow',
-    signal: AbortSignal.timeout(20000),
+    headers:  baseHeaders,
+    redirect: 'follow',          // follow any canonical redirects
+    signal:   AbortSignal.timeout(25000),
   })
-  if (!loginPageRes.ok && loginPageRes.status !== 200) {
+  if (loginPageRes.status >= 500) {
     throw new Error(`iVASMS login page returned HTTP ${loginPageRes.status}`)
   }
   const loginHtml = await loginPageRes.text()
-  // Multiple CSRF patterns
+
+  // Collect ALL Set-Cookie headers from Step 1 (CRITICAL — must use getAll)
+  const step1CookieArr = getAllSetCookies(loginPageRes)
+  let initCookies = parseCookiesArray(step1CookieArr)
+
+  // Extract form action URL — may differ from /login
+  const actionMatch = loginHtml.match(/<form[^>]+action=["']([^"']+)["'][^>]*method=["']post["']/i)
+                   || loginHtml.match(/<form[^>]+method=["']post["'][^>]+action=["']([^"']+)["']/i)
+  if (actionMatch) {
+    const a = actionMatch[1]
+    formAction = a.startsWith('http') ? a : `${BASE}${a.startsWith('/') ? '' : '/'}${a}`
+  }
+
+  // Extract CSRF _token from form — try multiple patterns
   const csrfPatterns = [
     /name=["']_token["']\s+value=["']([^"']+)["']/,
     /value=["']([^"']+)["']\s+name=["']_token["']/,
+    /<input[^>]+name=["']_token["'][^>]+value=["']([^"']+)["']/,
+    /<input[^>]+value=["']([^"']+)["'][^>]+name=["']_token["']/,
     /<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/,
     /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']csrf-token["']/,
     /window\.__csrf\s*=\s*["']([^"']+)["']/,
@@ -2592,67 +2750,91 @@ async function ivasmsLogin(email, password) {
     const m = loginHtml.match(pat)
     if (m) { csrfToken = m[1]; break }
   }
-  initCookies = parseCookies(loginPageRes.headers.get('set-cookie') || '')
 
-  if (!csrfToken) {
-    // Try fetching a dedicated CSRF endpoint
+  // If missing CSRF or session — try /sanctum/csrf-cookie to get both
+  if (!csrfToken || !initCookies.includes('laravel_session')) {
     try {
       const csrfRes = await fetch(`${BASE}/sanctum/csrf-cookie`, {
-        headers: { ...baseHeaders, Cookie: initCookies },
-        redirect: 'follow', signal: AbortSignal.timeout(10000),
+        headers:  { ...baseHeaders, Cookie: initCookies },
+        redirect: 'follow',
+        signal:   AbortSignal.timeout(12000),
       })
-      const newCookies = parseCookies(csrfRes.headers.get('set-cookie') || '')
-      initCookies = mergeCookies(initCookies, newCookies)
-      // Extract XSRF-TOKEN cookie value as CSRF token
-      const xsrfMatch = initCookies.match(/XSRF-TOKEN=([^;]+)/)
-      if (xsrfMatch) csrfToken = decodeURIComponent(xsrfMatch[1])
+      const csrfArr = getAllSetCookies(csrfRes)
+      initCookies = mergeCookies(initCookies, parseCookiesArray(csrfArr))
     } catch {}
   }
 
-  // Step 2 — POST login
-  const loginRes = await fetch(`${BASE}/login`, {
-    method: 'POST',
-    headers: {
-      ...baseHeaders,
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Cookie':        initCookies,
-      'Referer':       `${BASE}/login`,
-      'Origin':        BASE,
-      'Sec-Fetch-Site':'same-origin',
-      'Sec-Fetch-Mode':'navigate',
-      'Sec-Fetch-User':'?1',
-    },
+  // Decode XSRF-TOKEN cookie → use as X-XSRF-TOKEN header (Laravel SPA pattern)
+  let xsrfDecoded = ''
+  const xsrfMatch = initCookies.match(/XSRF-TOKEN=([^;]+)/)
+  if (xsrfMatch) {
+    try { xsrfDecoded = decodeURIComponent(xsrfMatch[1]) } catch {}
+  }
+  // Fallback: if still no _token from HTML, use decoded XSRF value
+  if (!csrfToken && xsrfDecoded) csrfToken = xsrfDecoded
+
+  // ── Step 2: POST login ────────────────────────────────────────────────────
+  const postHeaders = {
+    ...baseHeaders,
+    'Content-Type':   'application/x-www-form-urlencoded',
+    'Cookie':          initCookies,
+    'Referer':        `${BASE}/login`,
+    'Origin':          BASE,
+    'Sec-Fetch-Site': 'same-origin',
+    'Sec-Fetch-Mode': 'navigate',
+    'Sec-Fetch-User': '?1',
+    'Sec-Fetch-Dest': 'document',
+  }
+  // Send decoded XSRF-TOKEN as X-XSRF-TOKEN header (Laravel SPA auth)
+  if (xsrfDecoded) postHeaders['X-XSRF-TOKEN'] = xsrfDecoded
+
+  const loginRes = await fetch(formAction, {
+    method:   'POST',
+    headers:  postHeaders,
     body: new URLSearchParams({
       email,
       password,
       _token:   csrfToken,
       remember: 'on',
     }).toString(),
-    redirect: 'manual',
-    signal:   AbortSignal.timeout(20000),
+    redirect: 'manual',          // capture 302 without following
+    signal:   AbortSignal.timeout(25000),
   })
 
-  const loginSetCookie = parseCookies(loginRes.headers.get('set-cookie') || '')
-  const sessionCookies = mergeCookies(initCookies, loginSetCookie)
+  // Collect ALL cookies from POST response (getAll — CRITICAL)
+  const step2CookieArr = getAllSetCookies(loginRes)
+  const step2CookieStr = parseCookiesArray(step2CookieArr)
+  let sessionCookies   = mergeCookies(initCookies, step2CookieStr)
 
-  // Accept 200, 301, 302, 303 — all are valid login outcomes
   if (loginRes.status >= 400) {
-    throw new Error(`Login failed with HTTP ${loginRes.status}. Check credentials: ${email}`)
+    throw new Error(`Login HTTP ${loginRes.status} — check credentials: ${email}`)
   }
 
-  // Follow redirect to portal if needed
   const location = loginRes.headers.get('location') || ''
-  if (location && location.includes('/login')) {
-    throw new Error('Login rejected — iVASMS redirected back to login. Wrong password?')
+  if (location && (location.endsWith('/login') || location.includes('/login?'))) {
+    throw new Error(
+      `Login rejected — redirected back to /login. ` +
+      `csrf=${csrfToken.slice(0,20)}… initCookies=${initCookies.slice(0,100)} ` +
+      `step2cookies=${step2CookieStr.slice(0,100)}`
+    )
   }
 
-  return {
-    cookies: sessionCookies,
-    headers: baseHeaders,
-    base:    BASE,
+  // ── Step 3: Follow success redirect to collect any final session cookies ──
+  if (location && !location.includes('/login')) {
+    try {
+      const followUrl = location.startsWith('http') ? location : `${BASE}${location}`
+      const followRes = await fetch(followUrl, {
+        headers:  { ...baseHeaders, Cookie: sessionCookies },
+        redirect: 'manual',
+        signal:   AbortSignal.timeout(15000),
+      })
+      const followArr = getAllSetCookies(followRes)
+      sessionCookies  = mergeCookies(sessionCookies, parseCookiesArray(followArr))
+    } catch {}
   }
+
+  return { cookies: sessionCookies, headers: baseHeaders, base: BASE }
 }
-
 // ─── iVASMS Scraper (full — ALL pages, ALL numbers, ALL SMS) ─────────────────
 async function scrapeIVASMS(email, password, userId, kv) {
   const sess   = await ivasmsLogin(email, password)
@@ -2860,10 +3042,49 @@ async function scrapeIVASMS(email, password, userId, kv) {
 }
 
 // ─── Cookie helpers ────────────────────────────────────────────────────────
+// IMPORTANT: In Cloudflare Workers, response.headers.get('set-cookie') only
+// returns the FIRST Set-Cookie header. Use getAllSetCookies(response) to
+// collect ALL cookies (laravel_session, XSRF-TOKEN, etc.) correctly.
+
+function getAllSetCookies(response) {
+  // Cloudflare Workers supports headers.getAll() for set-cookie
+  // Fall back to iterating all headers if not available
+  try {
+    if (typeof response.headers.getAll === 'function') {
+      return response.headers.getAll('set-cookie')
+    }
+  } catch {}
+  // Fallback: iterate all header entries
+  const cookies = []
+  for (const [key, val] of response.headers.entries()) {
+    if (key.toLowerCase() === 'set-cookie') cookies.push(val)
+  }
+  return cookies
+}
+
+// Parse an array of raw Set-Cookie strings into a flat "name=value" map string
+function parseCookiesArray(setCookieArray) {
+  const map = new Map()
+  for (const raw of setCookieArray) {
+    if (!raw) continue
+    // Each raw entry is one Set-Cookie line: "name=value; Path=/; HttpOnly; ..."
+    const part = raw.split(';')[0].trim()
+    const eq = part.indexOf('=')
+    if (eq > 0) {
+      const k = part.slice(0, eq).trim()
+      const v = part.slice(eq + 1).trim()
+      if (k) map.set(k, v)
+    }
+  }
+  return [...map.entries()].map(([k, v]) => `${k}=${v}`).join('; ')
+}
+
+// Legacy single-string parse (used for backwards compat)
 function parseCookies(setCookieHeader) {
   if (!setCookieHeader) return ''
+  // Handle comma-separated multiple cookies in one string
   return setCookieHeader
-    .split(/,(?=[^;]+=[^;]+;)/)
+    .split(/,(?=[^;]+=[^;]+)/)
     .map(c => c.split(';')[0].trim())
     .filter(Boolean)
     .join('; ')
