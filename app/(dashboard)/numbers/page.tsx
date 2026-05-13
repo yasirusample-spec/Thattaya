@@ -21,6 +21,8 @@ export default function NumbersPage() {
   const [syncing,       setSyncing]       = useState(false)
   const [syncMsg,       setSyncMsg]       = useState<{ ok: boolean; text: string } | null>(null)
   const [needsSync,     setNeedsSync]     = useState(false)
+  const [regWA,         setRegWA]         = useState(false)
+  const [regWAMsg,      setRegWAMsg]      = useState<{ ok: boolean; text: string } | null>(null)
   const [loading,       setLoading]       = useState(true)
   const [expandedId,    setExpandedId]    = useState<string | null>(null)
   const [smsMap,        setSmsMap]        = useState<Record<string, any[]>>({})
@@ -69,6 +71,25 @@ export default function NumbersPage() {
     if (statusFilter) f = f.filter(n => n.status === statusFilter)
     setFiltered(f)
   }, [search, statusFilter, numbers])
+
+  const handleRegisterWA = async () => {
+    setRegWA(true); setRegWAMsg(null)
+    try {
+      const r = await fetch('/api/ivasms/register-whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ onlyActive: false }) })
+      const d = await r.json()
+      if (r.ok && d.ok) {
+        setRegWAMsg({ ok: true, text: `✅ ${d.added} numbers added to WhatsApp contacts (${d.total} total)` })
+        fetchNumbers()
+      } else {
+        setRegWAMsg({ ok: false, text: d.error || 'Registration failed' })
+      }
+    } catch {
+      setRegWAMsg({ ok: false, text: 'Network error' })
+    } finally {
+      setRegWA(false)
+      setTimeout(() => setRegWAMsg(null), 10000)
+    }
+  }
 
   const handleSync = async () => {
     setSyncing(true); setSyncMsg(null)
@@ -181,6 +202,12 @@ export default function NumbersPage() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+          {regWAMsg && (
+            <div className={`alert ${regWAMsg.ok ? 'alert-success' : 'alert-error'}`} style={{ padding: '7px 12px', fontSize: 12, margin: 0 }}>
+              <i className={`bi ${regWAMsg.ok ? 'bi-whatsapp' : 'bi-exclamation-triangle-fill'}`} />
+              {regWAMsg.text}
+            </div>
+          )}
           {syncMsg && (
             <div className={`alert ${syncMsg.ok ? 'alert-success' : 'alert-error'}`} style={{ padding: '7px 12px', fontSize: 12, margin: 0 }}>
               <i className={`bi ${syncMsg.ok ? 'bi-check2' : 'bi-exclamation-triangle-fill'}`} />
@@ -191,6 +218,17 @@ export default function NumbersPage() {
             <i className="bi bi-arrow-repeat" style={{ fontSize: 14 }} />
             Refresh
           </button>
+          {numbers.length > 0 && (
+            <button
+              onClick={handleRegisterWA}
+              disabled={regWA}
+              className="btn-secondary"
+              style={{ padding: '9px 18px', fontSize: 13, gap: 7, borderColor: '#25D366', color: '#25D366' }}
+            >
+              <i className="bi bi-whatsapp" style={{ fontSize: 15 }} />
+              {regWA ? 'Registering…' : 'Register All → WhatsApp'}
+            </button>
+          )}
           <button
             onClick={handleSync}
             disabled={syncing}

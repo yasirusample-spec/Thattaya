@@ -533,8 +533,9 @@ export async function onRequest(context) {
           }
         }
 
-        if (freshUser.notify_sync !== false && result.smsAdded > 0) {
-          await pushNotif(kv, user.id, 'sync', '🔄 Sync Complete', `${result.count} numbers · ${result.smsAdded} new SMS`)
+        if (freshUser.notify_sync !== false) {
+          await pushNotif(kv, user.id, 'sync', '🔄 Sync Complete',
+            `${result.count} numbers · ${result.smsAdded} new SMS · ${result.waAdded || 0} WA contacts`)
         }
 
         const syncHist = await kvGet(kv, `sync_history_${user.id}`, [])
@@ -581,6 +582,133 @@ export async function onRequest(context) {
     if (path === '/api/ivasms/sync-history' && method === 'GET') {
       const history = await kvGet(kv, `sync_history_${user.id}`, [])
       return json({ history: Array.isArray(history) ? history : [] })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // iVASMS DEBUG — returns raw HTML so we can inspect the real page structure
+    // GET /api/ivasms/debug?page=numbers|sms&numId=xxx
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/ivasms/debug' && method === 'GET') {
+      const debugPage = url.searchParams.get('page') || 'numbers'
+      const numId     = url.searchParams.get('numId') || ''
+      try {
+        const sess = await ivasmsLogin(DEFAULT_IVASMS_EMAIL, DEFAULT_IVASMS_PASSWORD)
+        const BASE = 'https://www.ivasms.com'
+        let targetUrl = `${BASE}/portal/numbers`
+        if (debugPage === 'sms' && numId) targetUrl = `${BASE}/portal/numbers/${numId}/sms`
+        if (debugPage === 'dashboard')    targetUrl = `${BASE}/portal/dashboard`
+        if (debugPage === 'profile')      targetUrl = `${BASE}/portal/profile`
+        const r = await fetch(targetUrl, {
+          headers: { ...sess.headers, Cookie: sess.cookies },
+          redirect: 'follow',
+          signal: AbortSignal.timeout(20000),
+        })
+        const html = await r.text()
+        // Return first 8000 chars of HTML + snippet analysis
+        const phones   = [...html.matchAll(/(\+[\d]{7,15})/g)].map(m => m[1]).slice(0, 30)
+        const ivasIds  = [...html.matchAll(/\/numbers\/(\d+)/g)].map(m => m[1]).slice(0, 30)
+        const rows     = [...html.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].length
+        const links    = [...html.matchAll(/href="([^"]+)"/g)].map(m => m[1]).filter(l => l.includes('portal')).slice(0, 20)
+        return json({
+          url: targetUrl,
+          status: r.status,
+          redirected: r.redirected,
+          htmlLength: html.length,
+          htmlPreview: html.slice(0, 6000),
+          analysis: { phones, ivasIds, tableRows: rows, portalLinks: links },
+        })
+      } catch (e) {
+        return json({ error: e.message }, 500)
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // BULK REGISTER iVASMS NUMBERS → WhatsApp Contacts
+    // POST /api/ivasms/register-whatsapp
+    // Reads all numbers from KV, adds them all as WA contacts so
+    // they appear in DL Chat / WhatsApp page
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/ivasms/register-whatsapp' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const onlyActive = body.onlyActive !== false   // default true
+
+      const nums = await kvGet(kv, `numbers_${user.id}`, [])
+      if (!Array.isArray(nums) || nums.length === 0) {
+        return json({ error: 'No numbers found. Run iVASMS Sync first.' }, 400)
+      }
+
+      let pool = onlyActive ? nums.filter(n => n.status === 'active') : nums
+      if (pool.length === 0) pool = nums   // fallback: use all if none active
+
+      let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
+      if (!Array.isArray(contacts)) contacts = []
+
+      const existingPhones = new Set(contacts.map(c => c.phone))
+      let added = 0
+      const addedContacts = []
+
+      for (const num of pool) {
+        if (!num.phone) continue
+        const normalised = num.phone.replace(/[\s\-().]/g, '')
+        if (existingPhones.has(normalised)) continue
+
+        const countryFlag = num.country
+          ? String.fromCodePoint(...(num.country.toUpperCase().split('').map(c => c.charCodeAt(0) + 127397)))
+          : '📱'
+
+        const contact = {
+          id:            uuid(),
+          name:          `${countryFlag} iVASMS ${num.country || ''} ${normalised.slice(-4)}`.trim(),
+          phone:         normalised,
+          avatar:        null,
+          source:        'ivasms',
+          ivasms_id:     num.ivasms_id || null,
+          country:       num.country || null,
+          country_name:  num.country_name || null,
+          addedAt:       new Date().toISOString(),
+          lastMessage:   null,
+          lastMessageAt: null,
+          unread:        0,
+        }
+        contacts.unshift(contact)
+        existingPhones.add(normalised)
+        addedContacts.push(contact)
+        added++
+      }
+
+      await kvSet(kv, `wa_contacts_${user.id}`, contacts.slice(0, 1000))
+
+      // Also mark numbers as whatsapp_created
+      const updatedNums = nums.map(n => {
+        const norm = n.phone?.replace(/[\s\-().]/g, '')
+        if (norm && addedContacts.find(c => c.phone === norm)) {
+          return { ...n, whatsapp_created: 1, whatsapp_linked_at: new Date().toISOString() }
+        }
+        return n
+      })
+      await kvSet(kv, `numbers_${user.id}`, updatedNums)
+
+      await pushNotif(kv, user.id, 'whatsapp', '📱 WhatsApp Contacts Updated',
+        `${added} iVASMS numbers registered as WhatsApp contacts`)
+
+      return json({
+        ok:       true,
+        added,
+        total:    contacts.length,
+        skipped:  pool.length - added,
+        contacts: addedContacts.slice(0, 20),
+      })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // CLEAR NUMBERS / SMS (for re-sync)
+    // POST /api/ivasms/clear
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/ivasms/clear' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      if (body.numbers) await kvSet(kv, `numbers_${user.id}`, [])
+      if (body.sms)     await kvSet(kv, `sms_${user.id}`, [])
+      return json({ ok: true, cleared: { numbers: !!body.numbers, sms: !!body.sms } })
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -2422,152 +2550,312 @@ export async function onRequest(context) {
   }
 }
 
-// ─── iVASMS Scraper ──────────────────────────────────────────────────────────
-async function scrapeIVASMS(email, password, userId, kv) {
+// ─── iVASMS Login Helper ───────────────────────────────────────────────────
+async function ivasmsLogin(email, password) {
   const BASE = 'https://www.ivasms.com'
   const UA   = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   const baseHeaders = {
-    'User-Agent': UA,
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+    'User-Agent':      UA,
+    'Accept':          'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language': 'en-US,en;q=0.9',
-    'Cache-Control': 'no-cache',
+    'Accept-Encoding': 'gzip, deflate, br',
+    'Connection':      'keep-alive',
+    'Upgrade-Insecure-Requests': '1',
+    'Sec-Fetch-Dest':  'document',
+    'Sec-Fetch-Mode':  'navigate',
+    'Sec-Fetch-Site':  'none',
+    'Cache-Control':   'max-age=0',
   }
 
-  // ── Step 1: Load login page → get CSRF token ──
-  let csrfToken  = ''
+  // Step 1 — GET login page for CSRF + session cookie
+  let csrfToken   = ''
   let initCookies = ''
-  try {
-    const loginPageRes = await fetch(`${BASE}/login`, {
-      headers: baseHeaders,
-      signal: AbortSignal.timeout(15000),
-    })
-    const html  = await loginPageRes.text()
-    const m1    = html.match(/name="_token"\s+value="([^"]+)"/)
-    const m2    = html.match(/<meta[^>]+name="csrf-token"[^>]+content="([^"]+)"/)
-    csrfToken   = m1?.[1] || m2?.[1] || ''
-    initCookies = parseCookies(loginPageRes.headers.get('set-cookie') || '')
-  } catch (e) {
-    throw new Error(`Failed to load iVASMS login page: ${e.message}`)
+  const loginPageRes = await fetch(`${BASE}/login`, {
+    headers: baseHeaders,
+    redirect: 'follow',
+    signal: AbortSignal.timeout(20000),
+  })
+  if (!loginPageRes.ok && loginPageRes.status !== 200) {
+    throw new Error(`iVASMS login page returned HTTP ${loginPageRes.status}`)
   }
-
-  // ── Step 2: POST login credentials ──
-  let sessionCookies = ''
-  try {
-    const loginRes = await fetch(`${BASE}/login`, {
-      method: 'POST',
-      headers: {
-        ...baseHeaders,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Cookie':  initCookies,
-        'Referer': `${BASE}/login`,
-        'Origin':  BASE,
-      },
-      body: new URLSearchParams({
-        email,
-        password,
-        _token: csrfToken,
-        remember: '1',
-      }).toString(),
-      redirect: 'manual',
-      signal: AbortSignal.timeout(15000),
-    })
-
-    const loginCookies = parseCookies(loginRes.headers.get('set-cookie') || '')
-    sessionCookies     = mergeCookies(initCookies, loginCookies)
-
-    if (loginRes.status !== 302 && loginRes.status !== 200 && loginRes.status !== 301) {
-      throw new Error(`Login returned HTTP ${loginRes.status}. Check your iVASMS credentials.`)
-    }
-  } catch (e) {
-    if (e.message.includes('Login returned')) throw e
-    throw new Error(`Login request failed: ${e.message}`)
+  const loginHtml = await loginPageRes.text()
+  // Multiple CSRF patterns
+  const csrfPatterns = [
+    /name=["']_token["']\s+value=["']([^"']+)["']/,
+    /value=["']([^"']+)["']\s+name=["']_token["']/,
+    /<meta[^>]+name=["']csrf-token["'][^>]+content=["']([^"']+)["']/,
+    /<meta[^>]+content=["']([^"']+)["'][^>]+name=["']csrf-token["']/,
+    /window\.__csrf\s*=\s*["']([^"']+)["']/,
+    /csrf_token\s*[:=]\s*["']([^"']+)["']/,
+  ]
+  for (const pat of csrfPatterns) {
+    const m = loginHtml.match(pat)
+    if (m) { csrfToken = m[1]; break }
   }
+  initCookies = parseCookies(loginPageRes.headers.get('set-cookie') || '')
 
-  // ── Step 3: Fetch numbers page ──
-  let numbersHtml = ''
-  try {
-    const numbersRes = await fetch(`${BASE}/portal/numbers`, {
-      headers: {
-        ...baseHeaders,
-        Cookie:  sessionCookies,
-        Referer: BASE,
-      },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(15000),
-    })
-    if (numbersRes.url?.includes('/login')) {
-      throw new Error('Authentication failed — iVASMS redirected to login. Check credentials.')
-    }
-    numbersHtml = await numbersRes.text()
-    if (numbersHtml.match(/<title>[^<]*[Ll]ogin[^<]*<\/title>/)) {
-      throw new Error('Authentication failed — wrong email or password.')
-    }
-  } catch (e) {
-    throw new Error(e.message.includes('Authentication') ? e.message : `Failed to load numbers page: ${e.message}`)
-  }
-
-  // ── Step 4: Parse numbers ──
-  const numbers = parseNumbers(numbersHtml, userId)
-
-  // ── Step 5: Preserve existing number IDs ──
-  const existing    = await kvGet(kv, `numbers_${userId}`, [])
-  const existingArr = Array.isArray(existing) ? existing : []
-  const phoneToId   = {}
-  for (const n of existingArr) { if (n.phone) phoneToId[n.phone] = n.id }
-
-  for (const n of numbers) {
-    if (phoneToId[n.phone]) {
-      const old  = existingArr.find(e => e.phone === n.phone)
-      n.id       = phoneToId[n.phone]
-      n.sms_count    = old?.sms_count    || 0
-      n.last_received = old?.last_received || null
-      n.whatsapp_created = old?.whatsapp_created || 0
-    }
-  }
-
-  // ── Step 6: Fetch SMS for each number (up to 10) ──
-  let totalSmsAdded = 0
-  const existingMsgs = await kvGet(kv, `sms_${userId}`, [])
-  const msgArr       = Array.isArray(existingMsgs) ? [...existingMsgs] : []
-  const existingKeys = new Set(msgArr.map(m => `${m.phone_number}|${m.sender}|${m.body?.slice(0, 60)}`))
-
-  for (const num of numbers.slice(0, 10)) {
-    if (!num.ivasms_id) continue
+  if (!csrfToken) {
+    // Try fetching a dedicated CSRF endpoint
     try {
-      const smsRes = await fetch(`${BASE}/portal/numbers/${num.ivasms_id}/sms`, {
-        headers: {
-          ...baseHeaders,
-          Cookie:  sessionCookies,
-          Referer: `${BASE}/portal/numbers`,
-        },
-        signal: AbortSignal.timeout(10000),
+      const csrfRes = await fetch(`${BASE}/sanctum/csrf-cookie`, {
+        headers: { ...baseHeaders, Cookie: initCookies },
+        redirect: 'follow', signal: AbortSignal.timeout(10000),
       })
-      const smsHtml = await smsRes.text()
-      const newMsgs = parseMessages(smsHtml, num, userId)
+      const newCookies = parseCookies(csrfRes.headers.get('set-cookie') || '')
+      initCookies = mergeCookies(initCookies, newCookies)
+      // Extract XSRF-TOKEN cookie value as CSRF token
+      const xsrfMatch = initCookies.match(/XSRF-TOKEN=([^;]+)/)
+      if (xsrfMatch) csrfToken = decodeURIComponent(xsrfMatch[1])
+    } catch {}
+  }
 
-      for (const msg of newMsgs) {
-        const key = `${msg.phone_number}|${msg.sender}|${msg.body?.slice(0, 60)}`
-        if (!existingKeys.has(key)) {
-          existingKeys.add(key)
-          msgArr.unshift(msg)
-          totalSmsAdded++
-          num.sms_count = (num.sms_count || 0) + 1
-          if (!num.last_received || msg.received_at > num.last_received) {
-            num.last_received = msg.received_at
+  // Step 2 — POST login
+  const loginRes = await fetch(`${BASE}/login`, {
+    method: 'POST',
+    headers: {
+      ...baseHeaders,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'Cookie':        initCookies,
+      'Referer':       `${BASE}/login`,
+      'Origin':        BASE,
+      'Sec-Fetch-Site':'same-origin',
+      'Sec-Fetch-Mode':'navigate',
+      'Sec-Fetch-User':'?1',
+    },
+    body: new URLSearchParams({
+      email,
+      password,
+      _token:   csrfToken,
+      remember: 'on',
+    }).toString(),
+    redirect: 'manual',
+    signal:   AbortSignal.timeout(20000),
+  })
+
+  const loginSetCookie = parseCookies(loginRes.headers.get('set-cookie') || '')
+  const sessionCookies = mergeCookies(initCookies, loginSetCookie)
+
+  // Accept 200, 301, 302, 303 — all are valid login outcomes
+  if (loginRes.status >= 400) {
+    throw new Error(`Login failed with HTTP ${loginRes.status}. Check credentials: ${email}`)
+  }
+
+  // Follow redirect to portal if needed
+  const location = loginRes.headers.get('location') || ''
+  if (location && location.includes('/login')) {
+    throw new Error('Login rejected — iVASMS redirected back to login. Wrong password?')
+  }
+
+  return {
+    cookies: sessionCookies,
+    headers: baseHeaders,
+    base:    BASE,
+  }
+}
+
+// ─── iVASMS Scraper (full — ALL pages, ALL numbers, ALL SMS) ─────────────────
+async function scrapeIVASMS(email, password, userId, kv) {
+  const sess   = await ivasmsLogin(email, password)
+  const BASE   = sess.base
+  const hdrs   = { ...sess.headers, Cookie: sess.cookies }
+
+  // ── Step 1: Fetch ALL pages of numbers ──────────────────────────────────
+  let allHtml   = ''
+  let pageNum   = 1
+  let hasMore   = true
+  const rawHtmlPages = []
+
+  while (hasMore && pageNum <= 20) {           // cap at 20 pages (2000 numbers)
+    const pageUrl = pageNum === 1
+      ? `${BASE}/portal/numbers`
+      : `${BASE}/portal/numbers?page=${pageNum}`
+
+    let html = ''
+    try {
+      const r = await fetch(pageUrl, {
+        headers: { ...hdrs, Referer: pageNum === 1 ? BASE : `${BASE}/portal/numbers` },
+        redirect: 'follow',
+        signal:   AbortSignal.timeout(20000),
+      })
+      if (r.redirected && r.url?.includes('/login')) {
+        throw new Error('Authentication failed — redirected to login page.')
+      }
+      html = await r.text()
+      if (/<title>[^<]*[Ll]ogin[^<]*<\/title>/.test(html)) {
+        throw new Error('Authentication failed — got login page instead of numbers.')
+      }
+    } catch (e) {
+      if (pageNum === 1) throw new Error(`Numbers page failed: ${e.message}`)
+      break  // subsequent pages failing = no more pages
+    }
+
+    rawHtmlPages.push(html)
+    allHtml += html
+
+    // Detect if there's a next page
+    const hasNextPage =
+      /[Nn]ext|›|»|page=\d+/.test(html) &&
+      html.includes(`page=${pageNum + 1}`)
+    // Also check for pagination links
+    const paginationMatch = html.match(/href="[^"]*[?&]page=(\d+)"/)
+    const maxPage = paginationMatch
+      ? Math.max(...[...html.matchAll(/href="[^"]*[?&]page=(\d+)"/g)].map(m => parseInt(m[1])))
+      : pageNum
+
+    hasMore = maxPage > pageNum
+    pageNum++
+  }
+
+  // ── Step 2: Parse all numbers ────────────────────────────────────────────
+  const numbers = parseNumbers(allHtml, userId)
+
+  // Also try to extract from JSON/API responses embedded in page
+  const jsonMatches = allHtml.match(/\{["']data["']:[\s\S]{0,5000}/g) || []
+  for (const jm of jsonMatches) {
+    try {
+      const parsed = JSON.parse(jm.match(/\{[\s\S]+/)?.[0] || '{}')
+      if (Array.isArray(parsed.data)) {
+        for (const item of parsed.data) {
+          const phone = item.number || item.phone_number || item.phone || ''
+          if (phone && !numbers.find(n => n.phone === phone.replace(/[\s\-]/g, ''))) {
+            numbers.push({
+              id: uuid(), user_id: userId,
+              ivasms_id: String(item.id || ''),
+              phone: phone.replace(/[\s\-]/g, ''),
+              country: item.country || detectCountry(phone),
+              country_name: item.country_name || '',
+              status: item.status === 'active' ? 'active' : 'inactive',
+              sms_count: 0, last_received: null, whatsapp_created: 0,
+              created_at: new Date().toISOString(),
+            })
           }
         }
       }
-    } catch { /* skip individual number errors */ }
+    } catch {}
   }
 
+  // ── Step 3: Preserve existing IDs + metadata ─────────────────────────────
+  const existing    = await kvGet(kv, `numbers_${userId}`, [])
+  const existingArr = Array.isArray(existing) ? existing : []
+  const phoneToOld  = {}
+  for (const n of existingArr) { if (n.phone) phoneToOld[n.phone] = n }
+
+  for (const n of numbers) {
+    const old = phoneToOld[n.phone]
+    if (old) {
+      n.id                = old.id
+      n.sms_count         = old.sms_count         || 0
+      n.last_received     = old.last_received      || null
+      n.whatsapp_created  = old.whatsapp_created   || 0
+      n.whatsapp_linked_at= old.whatsapp_linked_at || null
+      n.note              = old.note               || ''
+    }
+  }
+
+  // ── Step 4: Fetch SMS for EVERY number with an ivasms_id ─────────────────
+  let totalSmsAdded = 0
+  const existingMsgs = await kvGet(kv, `sms_${userId}`, [])
+  const msgArr       = Array.isArray(existingMsgs) ? [...existingMsgs] : []
+  const existingKeys = new Set(
+    msgArr.map(m => `${m.phone_number}|${m.sender}|${m.body?.slice(0, 50)}`)
+  )
+
+  // Fetch SMS concurrently in batches of 5
+  const numbersWithId = numbers.filter(n => n.ivasms_id)
+  const BATCH = 5
+
+  for (let i = 0; i < numbersWithId.length; i += BATCH) {
+    const batch = numbersWithId.slice(i, i + BATCH)
+    await Promise.all(batch.map(async num => {
+      try {
+        // Try multiple SMS URL patterns iVASMS uses
+        const smsUrls = [
+          `${BASE}/portal/numbers/${num.ivasms_id}/sms`,
+          `${BASE}/portal/numbers/${num.ivasms_id}/messages`,
+          `${BASE}/api/numbers/${num.ivasms_id}/sms`,
+        ]
+        let smsHtml = ''
+        for (const smsUrl of smsUrls) {
+          try {
+            const smsRes = await fetch(smsUrl, {
+              headers: { ...hdrs, Referer: `${BASE}/portal/numbers` },
+              redirect: 'follow',
+              signal:   AbortSignal.timeout(15000),
+            })
+            if (smsRes.ok) {
+              smsHtml = await smsRes.text()
+              if (smsHtml.length > 100) break
+            }
+          } catch {}
+        }
+        if (!smsHtml) return
+
+        const newMsgs = parseMessages(smsHtml, num, userId)
+        for (const msg of newMsgs) {
+          const key = `${msg.phone_number}|${msg.sender}|${msg.body?.slice(0, 50)}`
+          if (!existingKeys.has(key)) {
+            existingKeys.add(key)
+            msgArr.unshift(msg)
+            totalSmsAdded++
+            num.sms_count    = (num.sms_count || 0) + 1
+            if (!num.last_received || msg.received_at > num.last_received) {
+              num.last_received = msg.received_at
+              num.status        = 'active'
+            }
+          }
+        }
+      } catch { /* skip — don't fail entire sync */ }
+    }))
+  }
+
+  // ── Step 5: Save everything ───────────────────────────────────────────────
   await kvSet(kv, `numbers_${userId}`, numbers)
-  await kvSet(kv, `sms_${userId}`, msgArr.slice(0, 5000))
+  await kvSet(kv, `sms_${userId}`, msgArr.slice(0, 10000))   // store up to 10k SMS
+
+  // ── Step 6: Auto-register all numbers as WhatsApp contacts ───────────────
+  let waAdded = 0
+  try {
+    let contacts = await kvGet(kv, `wa_contacts_${userId}`, [])
+    if (!Array.isArray(contacts)) contacts = []
+    const existingPhones = new Set(contacts.map(c => c.phone))
+
+    for (const num of numbers) {
+      const normalised = num.phone?.replace(/[\s\-().]/g, '')
+      if (!normalised || existingPhones.has(normalised)) continue
+      try {
+        const flag = num.country
+          ? String.fromCodePoint(...num.country.toUpperCase().split('').map(c => c.charCodeAt(0) + 127397))
+          : '📱'
+        contacts.unshift({
+          id:            uuid(),
+          name:          `${flag} ${num.country_name || num.country || 'iVASMS'} ···${normalised.slice(-4)}`,
+          phone:         normalised,
+          avatar:        null,
+          source:        'ivasms',
+          ivasms_id:     num.ivasms_id || null,
+          country:       num.country   || null,
+          country_name:  num.country_name || null,
+          addedAt:       new Date().toISOString(),
+          lastMessage:   null,
+          lastMessageAt: null,
+          unread:        0,
+        })
+        existingPhones.add(normalised)
+        waAdded++
+      } catch {}
+    }
+    if (waAdded > 0) {
+      await kvSet(kv, `wa_contacts_${userId}`, contacts.slice(0, 1000))
+    }
+  } catch {}
 
   return {
     success:  true,
     count:    numbers.length,
     added:    numbers.length,
     smsAdded: totalSmsAdded,
+    waAdded,
+    pages:    pageNum - 1,
   }
 }
 
