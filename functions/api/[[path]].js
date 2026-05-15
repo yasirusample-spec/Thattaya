@@ -639,7 +639,7 @@ export async function onRequest(context) {
         for (const p of csrfPatterns) { const m = loginHtml.match(p); if (m) { csrfToken = m[1]; break } }
 
         // Try sanctum/csrf-cookie if session missing
-        if (!initCookies.includes('laravel_session')) {
+        if (!initCookies.includes('laravel_session') && !initCookies.includes('ivas_sms_session') && !initCookies.includes('_session') && !initCookies.includes('ivas_sms_session') && !initCookies.includes('_session')) {
           try {
             const csrfRes = await fetch(`${BASE}/sanctum/csrf-cookie`, {
               headers: { ...baseHdrs, Cookie: initCookies }, redirect: 'follow', signal: AbortSignal.timeout(12000),
@@ -664,7 +664,7 @@ export async function onRequest(context) {
           csrfToken:    csrfToken.slice(0, 40) + (csrfToken.length > 40 ? '…' : ''),
           rawSetCookieHeaders: step1CookieArr,
           initCookies:  initCookies.slice(0, 400),
-          hasSession:   initCookies.includes('laravel_session'),
+          hasSession:   initCookies.includes('laravel_session') || initCookies.includes('ivas_sms_session') || initCookies.includes('_session'),
           hasXSRF:      initCookies.includes('XSRF-TOKEN'),
           xsrfDecoded:  xsrfDecoded.slice(0, 40),
           htmlLen:      loginHtml.length,
@@ -715,7 +715,7 @@ export async function onRequest(context) {
           rawSetCookieHeaders: step2CookieArr,
           step2CookieStr:   step2CookieStr.slice(0, 300),
           sessionCookies:   sessionCookies.slice(0, 300),
-          hasSession:       sessionCookies.includes('laravel_session'),
+          hasSession:       sessionCookies.includes('laravel_session') || sessionCookies.includes('ivas_sms_session') || sessionCookies.includes('_session'),
           bodyLen:          loginBody.length,
           bodyPreview:      loginBody.slice(0, 400),
           credentialsUsed:  { email: DEFAULT_IVASMS_EMAIL, passLen: DEFAULT_IVASMS_PASSWORD.length },
@@ -840,7 +840,188 @@ export async function onRequest(context) {
     }
 
     // ══════════════════════════════════════════════════════════════════
+    // ══════════════════════════════════════════════════════════════════
+    // TEST iVASMS CREDENTIALS — POST /api/ivasms/test-creds
+    // Pass {email, password} to test without doing a full sync
+    // Returns {ok, step1:{csrfFound,cookiesCount}, step2:{status,location,success}}
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/ivasms/test-creds' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const testEmail = String(body.email || DEFAULT_IVASMS_EMAIL).trim()
+      const testPass  = String(body.password || DEFAULT_IVASMS_PASSWORD).trim()
+      const result = { email: testEmail, steps: [] }
+      try {
+        const BASE = 'https://www.ivasms.com'
+        const UA   = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36'
+        const hdrs = {
+          'User-Agent': UA,
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Cache-Control': 'no-cache',
+        }
+
+        // Step 1: GET login page
+        const r1 = await fetch(`${BASE}/login`, { headers: hdrs, redirect: 'follow', signal: AbortSignal.timeout(20000) })
+        const html1 = await r1.text()
+        const cookies1arr = getAllSetCookies(r1)
+        let cookies1 = parseCookiesArray(cookies1arr)
+        let csrf = ''
+        const csrfPatterns = [/name=["']_token["']\s+value=["']([^"']+)["']/, /value=["']([^"']+)["']\s+name=["']_token["']/, /<input[^>]+name=["']_token["'][^>]+value=["']([^"']+)["']/]
+        for (const p of csrfPatterns) { const m = html1.match(p); if (m) { csrf = m[1]; break } }
+        // XSRF decode
+        let xsrf = ''
+        const xm = cookies1.match(/XSRF-TOKEN=([^;]+)/)
+        if (xm) { try { xsrf = decodeURIComponent(xm[1]) } catch {} }
+        if (!csrf && xsrf) csrf = xsrf
+
+        result.steps.push({
+          step: 1, label: 'GET /login',
+          status: r1.status,
+          csrfFound: !!csrf,
+          rawCookieCount: cookies1arr.length,
+          cookieNames: cookies1arr.map(c => c.split('=')[0]),
+          hasSession: cookies1.includes('ivas_sms_session') || cookies1.includes('laravel_session'),
+        })
+
+        // Step 2: POST login
+        const postHdrs = {
+          ...hdrs,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Cookie': cookies1,
+          'Referer': `${BASE}/login`,
+          'Origin': BASE,
+        }
+        if (xsrf) postHdrs['X-XSRF-TOKEN'] = xsrf
+
+        const r2 = await fetch(`${BASE}/login`, {
+          method: 'POST',
+          headers: postHdrs,
+          body: new URLSearchParams({ email: testEmail, password: testPass, _token: csrf, remember: 'on' }).toString(),
+          redirect: 'manual',
+          signal: AbortSignal.timeout(20000),
+        })
+        const cookies2arr = getAllSetCookies(r2)
+        const cookies2 = parseCookiesArray(cookies2arr)
+        const loc = r2.headers.get('location') || ''
+        const success = r2.status === 302 && !loc.includes('/login')
+
+        result.steps.push({
+          step: 2, label: 'POST /login',
+          status: r2.status,
+          location: loc,
+          success,
+          rawCookieCount: cookies2arr.length,
+          cookieNames: cookies2arr.map(c => c.split('=')[0]),
+          hasSession: cookies2.includes('ivas_sms_session') || cookies2.includes('laravel_session'),
+        })
+
+        result.loginSuccess = success
+        result.message = success
+          ? '✅ Login successful! You can now save these credentials and sync.'
+          : `❌ Login failed — server redirected back to /login. Wrong password for ${testEmail}?`
+
+        // If success, save credentials to user
+        if (success && body.save) {
+          let users = await kvGet(kv, 'users', [])
+          if (!Array.isArray(users)) users = []
+          let idx = users.findIndex(u => u.id === user.id)
+          if (idx === -1) { users.push({ ...user }); idx = users.length - 1 }
+          users[idx].ivasms_email    = testEmail
+          users[idx].ivasms_password = testPass
+          await kvSet(kv, 'users', users)
+          result.saved = true
+        }
+      } catch (e) {
+        result.error = e.message
+        result.loginSuccess = false
+      }
+      return json(result)
+    }
+
     // CLEAR NUMBERS / SMS (for re-sync)
+    // ══════════════════════════════════════════════════════════════════
+    // FORGOT PASSWORD — POST /api/ivasms/forgot-password
+    // Trigger iVASMS password reset email for the account
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/ivasms/forgot-password' && method === 'POST') {
+      const body   = await request.json().catch(() => ({}))
+      const email  = String(body.email || DEFAULT_IVASMS_EMAIL).trim()
+      const BASE   = 'https://www.ivasms.com'
+      const UA     = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0 Safari/537.36'
+      const hdrs   = { 'User-Agent': UA, 'Accept': 'text/html,application/xhtml+xml,*/*;q=0.8', 'Accept-Language': 'en-US,en;q=0.9' }
+
+      try {
+        // Step 1: GET forgot-password page for CSRF + session
+        const fgUrls = [`${BASE}/forgot-password`, `${BASE}/password/reset`, `${BASE}/password/email`]
+        let fgHtml = '', fgCookies = '', fgUrl = '', csrf = ''
+
+        for (const u of fgUrls) {
+          try {
+            const r = await fetch(u, { headers: hdrs, redirect: 'follow', signal: AbortSignal.timeout(15000) })
+            if (r.status === 200) {
+              fgHtml = await r.text()
+              fgUrl  = u
+              const arr = getAllSetCookies(r)
+              fgCookies = parseCookiesArray(arr)
+              const m = fgHtml.match(/name=["']_token["']\s+value=["']([^"']+)["']/)
+                     || fgHtml.match(/<input[^>]+name=["']_token["'][^>]+value=["']([^"']+)["']/)
+              if (m) csrf = m[1]
+              break
+            }
+          } catch {}
+        }
+
+        if (!fgHtml) return json({ error: 'Could not reach iVASMS forgot-password page' }, 502)
+
+        // Decode XSRF
+        let xsrf = ''
+        const xm = fgCookies.match(/XSRF-TOKEN=([^;]+)/)
+        if (xm) { try { xsrf = decodeURIComponent(xm[1]) } catch {} }
+        if (!csrf && xsrf) csrf = xsrf
+
+        // Step 2: POST the forgot-password form
+        const postHdrs = {
+          ...hdrs,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Cookie': fgCookies,
+          'Referer': fgUrl,
+          'Origin': BASE,
+        }
+        if (xsrf) postHdrs['X-XSRF-TOKEN'] = xsrf
+
+        const postUrls = [`${BASE}/forgot-password`, `${BASE}/password/email`, `${BASE}/password/reset`]
+        let postStatus = 0, postLocation = ''
+        for (const pu of postUrls) {
+          try {
+            const r2 = await fetch(pu, {
+              method: 'POST',
+              headers: postHdrs,
+              body: new URLSearchParams({ email, _token: csrf }).toString(),
+              redirect: 'manual',
+              signal: AbortSignal.timeout(15000),
+            })
+            postStatus   = r2.status
+            postLocation = r2.headers.get('location') || ''
+            if (r2.status < 400) break
+          } catch {}
+        }
+
+        return json({
+          ok: postStatus < 400,
+          email,
+          postStatus,
+          postLocation,
+          formUrl: fgUrl,
+          csrfFound: !!csrf,
+          message: postStatus < 400
+            ? `✅ Password reset email sent to ${email}. Check your inbox and spam folder, then update credentials via Settings → iVASMS.`
+            : `⚠️ Reset form submitted (HTTP ${postStatus}). If you don't receive an email within 5 min, try logging into ivasms.com directly.`,
+        })
+      } catch (e) {
+        return json({ error: e.message }, 500)
+      }
+    }
+
     // POST /api/ivasms/clear
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/ivasms/clear' && method === 'POST') {
@@ -1571,10 +1752,17 @@ export async function onRequest(context) {
         if (body.theme)                              users[idx].theme = body.theme
 
       } else if (body.type === 'ivasms') {
-        // iVASMS is system-configured — users cannot change it
-        // silently keep defaults
-        users[idx].ivasms_email    = DEFAULT_IVASMS_EMAIL
-        users[idx].ivasms_password = DEFAULT_IVASMS_PASSWORD
+        // Admin can update iVASMS credentials
+        if (body.email && String(body.email).trim()) {
+          users[idx].ivasms_email = String(body.email).trim()
+        } else {
+          users[idx].ivasms_email = DEFAULT_IVASMS_EMAIL
+        }
+        if (body.password && String(body.password).trim()) {
+          users[idx].ivasms_password = String(body.password).trim()
+        } else if (!users[idx].ivasms_password) {
+          users[idx].ivasms_password = DEFAULT_IVASMS_PASSWORD
+        }
 
       } else if (body.type === 'telegram') {
         users[idx].telegram_bot_token = String(body.botToken || '')
@@ -2752,7 +2940,7 @@ async function ivasmsLogin(email, password) {
   }
 
   // If missing CSRF or session — try /sanctum/csrf-cookie to get both
-  if (!csrfToken || !initCookies.includes('laravel_session')) {
+  if (!csrfToken || (!initCookies.includes('laravel_session') && !initCookies.includes('ivas_sms_session') && !initCookies.includes('_session') && !initCookies.includes('ivas_sms_session') && !initCookies.includes('_session'))) {
     try {
       const csrfRes = await fetch(`${BASE}/sanctum/csrf-cookie`, {
         headers:  { ...baseHeaders, Cookie: initCookies },

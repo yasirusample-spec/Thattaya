@@ -25,6 +25,12 @@ export default function SettingsPage() {
   const [copied,      setCopied]      = useState<string | null>(null)
   const [testingTg,   setTestingTg]   = useState(false)
   const [tab,         setTab]         = useState<'account'|'integrations'|'preferences'|'token'>('account')
+  const [ivasCreds,      setIvasCreds]      = useState({ email: 'ohlivvy53@gmail.com', password: '' })
+  const [ivasTestResult, setIvasTestResult] = useState<{loginSuccess?:boolean; success?:boolean; message?:string; steps?:any[]} | null>(null)
+  const [ivasTesting,    setIvasTesting]    = useState(false)
+  const [ivasSaving,     setIvasSaving]     = useState(false)
+  const [ivasForgotMsg,  setIvasForgotMsg]  = useState<string>('')
+  const [ivasForgotLoad, setIvasForgotLoad] = useState(false)
 
   useEffect(() => {
     fetch('/api/settings')
@@ -144,6 +150,53 @@ export default function SettingsPage() {
     </div>
   )
 
+  const forgotIvas = async () => {
+    setIvasForgotLoad(true); setIvasForgotMsg('')
+    try {
+      const r = await fetch('/api/ivasms/forgot-password', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: ivasCreds.email }),
+      })
+      const d = await r.json()
+      setIvasForgotMsg(d.message || d.error || 'Request sent')
+    } catch (e: any) { setIvasForgotMsg('Network error: ' + e.message) }
+    setIvasForgotLoad(false)
+  }
+
+  const testIvas = async () => {
+    if (!ivasCreds.password) { setIvasTestResult({ success: false, message: '❌ Enter password first' }); return }
+    setIvasTesting(true); setIvasTestResult(null)
+    try {
+      const r = await fetch('/api/ivasms/test-creds', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: ivasCreds.email, password: ivasCreds.password, save: false }),
+      })
+      const d = await r.json()
+      setIvasTestResult(d)
+    } catch (e: any) { setIvasTestResult({ success: false, message: '❌ Network error: ' + e.message }) }
+    setIvasTesting(false)
+  }
+
+  const saveIvas = async () => {
+    if (!ivasCreds.password) { setMsg('ivas', 'error', 'Enter password first'); return }
+    setIvasSaving(true)
+    try {
+      const r = await fetch('/api/ivasms/test-creds', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: ivasCreds.email, password: ivasCreds.password, save: true }),
+      })
+      const d = await r.json()
+      if (d.loginSuccess) {
+        setMsg('ivas', 'success', '✅ Credentials verified & saved! Go to Numbers page and click Sync.')
+        setIvasTestResult(d)
+      } else {
+        setMsg('ivas', 'error', d.message || '❌ Login failed — wrong credentials')
+        setIvasTestResult(d)
+      }
+    } catch (e: any) { setMsg('ivas', 'error', 'Network error: ' + (e as any).message) }
+    setIvasSaving(false)
+  }
+
   return (
     <div style={{ maxWidth: 760 }}>
       <div style={{ marginBottom: 24 }}>
@@ -240,59 +293,97 @@ export default function SettingsPage() {
       {/* ── Integrations tab ── */}
       {tab === 'integrations' && (
         <>
-          <Section icon="bi-phone-fill" title="iVASMS Integration" badge="System Configured">
-            {/* iVASMS is locked — credentials are system-managed, not user-configurable */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div style={{
-                padding: '16px 20px',
-                background: 'linear-gradient(135deg, rgba(0,230,118,.08), rgba(0,230,118,.04))',
-                border: '1px solid rgba(0,230,118,.25)',
-                borderRadius: 12,
-                display: 'flex', alignItems: 'center', gap: 14,
-              }}>
-                <div style={{
-                  width: 44, height: 44, borderRadius: 10, flexShrink: 0,
-                  background: 'rgba(0,230,118,.15)', border: '1px solid rgba(0,230,118,.3)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                }}>
-                  <i className="bi bi-shield-check-fill" style={{ fontSize: 20, color: 'var(--green)' }} />
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--green)', marginBottom: 3 }}>
-                    iVASMS — System Configured ✓
-                  </div>
-                  <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5 }}>
-                    iVASMS credentials are securely managed by the system administrator.
-                    Numbers and SMS are synced automatically.
-                  </div>
+          <Section icon="bi-phone-fill" title="iVASMS Integration" badge="Live Scraper">
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+              {/* Info banner */}
+              <div style={{ padding: '12px 16px', background: 'rgba(99,179,237,.08)', border: '1px solid rgba(99,179,237,.25)', borderRadius: 10, display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                <i className="bi bi-info-circle-fill" style={{ color: 'var(--blue)', fontSize: 16, flexShrink: 0, marginTop: 1 }} />
+                <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6 }}>
+                  Enter your <strong style={{ color: 'var(--text)' }}>iVASMS account credentials</strong>. Click <strong style={{ color: 'var(--green)' }}>Test Login</strong> first to verify, then <strong style={{ color: 'var(--accent)' }}>Save & Apply</strong> to store them. After saving, go to <strong style={{ color: 'var(--text)' }}>Numbers</strong> page and click <strong style={{ color: 'var(--green)' }}>Sync Now</strong> to scrape all your numbers.
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                {[
-                  { icon: 'bi-envelope-fill', label: 'Account', value: '●●●●●●●●@●●●●●●●.com', color: 'var(--blue)' },
-                  { icon: 'bi-lock-fill',     label: 'Password', value: '●●●●●●●●●●●●', color: 'var(--accent)' },
-                  { icon: 'bi-telephone-fill',label: 'Numbers Synced', value: '1,000+', color: 'var(--green)' },
-                  { icon: 'bi-arrow-repeat',  label: 'Auto-Sync', value: 'Active', color: 'var(--yellow)' },
-                ].map(row => (
-                  <div key={row.label} style={{
-                    padding: '10px 14px',
-                    background: 'var(--bg2)', border: '1px solid var(--border)', borderRadius: 8,
-                    display: 'flex', alignItems: 'center', gap: 10,
+              {/* Credentials form */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <div className="form-group">
+                  <label className="form-label">iVASMS Email</label>
+                  <div className="input-group">
+                    <i className="bi bi-envelope-fill input-icon" />
+                    <input className="form-control" type="email" placeholder="your@email.com"
+                      value={ivasCreds.email}
+                      onChange={e => setIvasCreds(p => ({ ...p, email: e.target.value }))} />
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">iVASMS Password</label>
+                  <div className="input-group">
+                    <i className="bi bi-lock-fill input-icon" />
+                    <input className="form-control" type={showPwd ? 'text' : 'password'} placeholder="Enter your iVASMS password"
+                      value={ivasCreds.password}
+                      onChange={e => setIvasCreds(p => ({ ...p, password: e.target.value }))} />
+                    <button type="button" className="btn-icon" onClick={() => setShowPwd(v => !v)}
+                      style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)' }}>
+                      <i className={`bi ${showPwd ? 'bi-eye-slash' : 'bi-eye'}`} />
+                    </button>
+                  </div>
+                </div>
+
+                {/* Test result */}
+                {ivasTestResult && (
+                  <div style={{
+                    padding: '12px 14px', borderRadius: 10, fontSize: 12,
+                    background: ivasTestResult.loginSuccess ? 'rgba(0,230,118,.08)' : 'rgba(255,82,82,.08)',
+                    border: `1px solid ${ivasTestResult.loginSuccess ? 'rgba(0,230,118,.3)' : 'rgba(255,82,82,.3)'}`,
+                    color: ivasTestResult.loginSuccess ? 'var(--green)' : '#ff5252',
                   }}>
-                    <i className={`bi ${row.icon}`} style={{ color: row.color, fontSize: 14, flexShrink: 0 }} />
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 1 }}>{row.label}</div>
-                      <div style={{ fontSize: 12, color: 'var(--text2)', fontFamily: 'monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.value}</div>
-                    </div>
+                    <div style={{ fontWeight: 700, marginBottom: 6 }}>{ivasTestResult.message}</div>
+                    {ivasTestResult.steps?.map((s: any) => (
+                      <div key={s.step} style={{ fontSize: 11, color: 'var(--text2)', marginTop: 3 }}>
+                        Step {s.step}: {s.label} → HTTP {s.status}
+                        {s.step === 1 && ` | CSRF: ${s.csrfFound ? '✅' : '❌'} | Cookies: ${s.rawCookieCount} [${(s.cookieNames||[]).join(', ')}]`}
+                        {s.step === 2 && ` | ${s.success ? '✅ SUCCESS → ' + s.location : '❌ FAIL → ' + s.location}`}
+                      </div>
+                    ))}
                   </div>
-                ))}
+                )}
+
+                <MsgBox msg={msgs['ivas'] || null} />
+
+                {/* Forgot password message */}
+                {ivasForgotMsg && (
+                  <div style={{ padding: '10px 14px', borderRadius: 8, fontSize: 12, background: 'rgba(255,193,7,.08)', border: '1px solid rgba(255,193,7,.3)', color: 'var(--yellow)' }}>
+                    {ivasForgotMsg}
+                  </div>
+                )}
+
+                {/* Buttons */}
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button type="button" className="btn btn-outline" onClick={testIvas} disabled={ivasTesting}
+                    style={{ flex: 1, minWidth: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                    <i className={`bi ${ivasTesting ? 'bi-arrow-clockwise' : 'bi-wifi'}`}
+                      style={{ animation: ivasTesting ? 'spin 1s linear infinite' : undefined }} />
+                    {ivasTesting ? 'Testing...' : 'Test Login'}
+                  </button>
+                  <button type="button" className="btn btn-primary" onClick={saveIvas} disabled={ivasSaving}
+                    style={{ flex: 1, minWidth: 120, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                      background: ivasTestResult?.loginSuccess ? 'var(--green)' : undefined }}>
+                    <i className={`bi ${ivasSaving ? 'bi-arrow-clockwise' : 'bi-floppy-fill'}`}
+                      style={{ animation: ivasSaving ? 'spin 1s linear infinite' : undefined }} />
+                    {ivasSaving ? 'Saving...' : 'Save & Apply'}
+                  </button>
+                  <button type="button" className="btn btn-outline" onClick={forgotIvas} disabled={ivasForgotLoad}
+                    style={{ flex: '0 0 auto', display: 'flex', alignItems: 'center', gap: 6, borderColor: 'var(--yellow)', color: 'var(--yellow)' }}>
+                    <i className={`bi ${ivasForgotLoad ? 'bi-arrow-clockwise' : 'bi-envelope-arrow-up'}`}
+                      style={{ animation: ivasForgotLoad ? 'spin 1s linear infinite' : undefined }} />
+                    {ivasForgotLoad ? '...' : 'Reset Pwd'}
+                  </button>
+                </div>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 0' }}>
-                <span className="dot dot-green dot-pulse" />
-                <span style={{ fontSize: 12, color: 'var(--green)', fontWeight: 600 }}>Connected & Syncing</span>
-                <span style={{ fontSize: 11, color: 'var(--text3)', marginLeft: 4 }}>· Managed by Death Legion Admin</span>
+              <div style={{ padding: '10px 0', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
+                <i className="bi bi-lightbulb-fill" style={{ color: 'var(--yellow)', fontSize: 13 }} />
+                <span style={{ fontSize: 11, color: 'var(--text3)' }}>After saving → Numbers page → Sync Now → all numbers scraped + auto-added to WhatsApp contacts</span>
               </div>
             </div>
           </Section>
