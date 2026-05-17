@@ -2601,79 +2601,312 @@ export async function onRequest(context) {
     // WHATSAPP BUSINESS API ENDPOINTS
     // ══════════════════════════════════════════════════════════════════
 
-    if (path === '/api/whatsapp-business/status' && method === 'GET') {
-      const wbData = await kvGet(kv, `wb_${user.id}`, null)
-      if (!wbData) return json({ status: 'none', account: null })
-      return json({ status: wbData.status || 'inactive', account: wbData })
-    }
+    // ══════════════════════════════════════════════════════════════════
+    // REAL WHATSAPP CLOUD API (Meta) — all calls go to graph.facebook.com
+    // Docs: https://developers.facebook.com/docs/whatsapp/cloud-api
+    //
+    // Admin configures:
+    //   wa_phone_id    = Phone Number ID from Meta Business > WhatsApp > Phone Numbers
+    //   wa_token       = Permanent System User Access Token from Meta Business Manager
+    //   wa_waba_id     = WhatsApp Business Account ID
+    //   wa_webhook_verify = any random string used to verify webhook
+    //
+    // These are stored in KV under wa_config_{userId}
+    // ══════════════════════════════════════════════════════════════════
 
-    if (path === '/api/whatsapp-business/create' && method === 'POST') {
-      const body = await request.json().catch(() => ({}))
-      const { businessName, phone, plan, email } = body
-      if (!businessName || !phone) return json({ error: 'Business name and phone are required' }, 400)
-      const steps = [
-        'Validating business information…',
-        'Registering with Meta Business Suite…',
-        'Phone number verification via OTP…',
-        'Configuring WABA (WhatsApp Business Account)…',
-        'Setting up message templates…',
-        'Generating API credentials…',
-        'Activating Business API endpoint…',
-        'Account provisioned successfully ✓',
-      ]
-      const account = {
-        id: uuid(),
-        businessName,
-        phone,
-        email: email || user.email,
-        plan: plan || 'starter',
-        status: 'active',
-        wabaId: 'WABA_' + Math.random().toString(36).slice(2,12).toUpperCase(),
-        phoneNumberId: 'PH_' + Math.random().toString(36).slice(2,10).toUpperCase(),
-        accessToken: 'EAABZCaT' + Math.random().toString(36).slice(2,30).toUpperCase(),
-        createdAt: new Date().toISOString(),
-        messagesCount: 0,
-        templates: ['OTP Verification','Welcome Message','Order Confirmed','Appointment Reminder'],
-      }
-      await kvSet(kv, `wb_${user.id}`, { ...account, status: 'active' })
-      return json({ ok: true, account, steps })
-    }
-
-    if (path === '/api/whatsapp-business/campaign' && method === 'POST') {
-      const body = await request.json().catch(() => ({}))
-      const { template, recipients, message } = body
-      if (!template || !recipients) return json({ error: 'Template and recipients required' }, 400)
-      const recipientList = Array.isArray(recipients) ? recipients : [recipients]
-      const results = recipientList.map(r => ({
-        phone: r,
-        status: Math.random() > 0.05 ? 'delivered' : 'failed',
-        timestamp: new Date().toISOString(),
-      }))
-      const delivered = results.filter(r => r.status === 'delivered').length
-      const campaigns = await kvGet(kv, `wb_campaigns_${user.id}`, [])
-      campaigns.unshift({
-        id: uuid(),
-        template,
-        message: message || '',
-        total: recipientList.length,
-        delivered,
-        failed: recipientList.length - delivered,
-        sentAt: new Date().toISOString(),
-        results,
+    // ── GET /api/wa/config — read current WA Cloud API config ─────────────
+    if (path === '/api/wa/config' && method === 'GET') {
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      return json({
+        phoneId:       cfg.phoneId    || '',
+        wabaId:        cfg.wabaId     || '',
+        hasToken:      !!(cfg.token),
+        tokenPreview:  cfg.token ? cfg.token.slice(0,12)+'…' : '',
+        webhookVerify: cfg.webhookVerify || '',
+        phoneNumber:   cfg.phoneNumber  || '',
+        displayName:   cfg.displayName  || '',
+        status:        cfg.status        || 'unconfigured',
+        configuredAt:  cfg.configuredAt  || null,
       })
-      await kvSet(kv, `wb_campaigns_${user.id}`, campaigns.slice(0, 100))
-      return json({ ok: true, total: recipientList.length, delivered, failed: recipientList.length - delivered, results })
     }
 
-    if (path === '/api/whatsapp-business/campaigns' && method === 'GET') {
-      const campaigns = await kvGet(kv, `wb_campaigns_${user.id}`, [])
-      return json({ campaigns })
+    // ── POST /api/wa/config — save WA Cloud API credentials ───────────────
+    if (path === '/api/wa/config' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { phoneId, token, wabaId, webhookVerify } = body
+      if (!phoneId || !token) return json({ error: 'phoneId and token are required' }, 400)
+
+      // Verify token works by hitting the Meta API
+      let verified = false, phoneNumber = '', displayName = '', verifyError = ''
+      try {
+        const metaRes = await fetch(
+          `https://graph.facebook.com/v19.0/${phoneId}?fields=display_phone_number,verified_name,status,quality_rating`,
+          { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
+        )
+        const metaData = await metaRes.json()
+        if (metaData.error) {
+          verifyError = metaData.error.message || 'Meta API error'
+        } else {
+          verified     = true
+          phoneNumber  = metaData.display_phone_number || ''
+          displayName  = metaData.verified_name        || ''
+        }
+      } catch (e) { verifyError = e.message }
+
+      const cfg = {
+        phoneId,
+        token,
+        wabaId:        wabaId        || '',
+        webhookVerify: webhookVerify || 'dlsms_verify_' + uuid().slice(0,8),
+        phoneNumber,
+        displayName,
+        status:        verified ? 'active' : 'error',
+        verifyError:   verifyError  || '',
+        configuredAt:  new Date().toISOString(),
+      }
+      await kvSet(kv, `wa_config_${user.id}`, cfg)
+      return json({
+        ok: true,
+        verified,
+        phoneNumber,
+        displayName,
+        status: cfg.status,
+        webhookVerify: cfg.webhookVerify,
+        verifyError,
+        webhookUrl: `https://dl-sms-client.pages.dev/api/wa/webhook`,
+        message: verified
+          ? `✅ Connected! Number: ${phoneNumber} (${displayName}). Set your webhook URL in Meta to https://dl-sms-client.pages.dev/api/wa/webhook`
+          : `⚠️ Credentials saved but verification failed: ${verifyError}. Check your Phone ID and Token.`,
+      })
     }
 
+    // ── GET /api/wa/webhook — Meta webhook verification (GET challenge) ────
+    if (path === '/api/wa/webhook' && method === 'GET') {
+      // Meta sends: ?hub.mode=subscribe&hub.verify_token=X&hub.challenge=Y
+      const mode      = url.searchParams.get('hub.mode')
+      const verifyTok = url.searchParams.get('hub.verify_token')
+      const challenge = url.searchParams.get('hub.challenge')
+      // Find the user whose verify token matches (admin only for now)
+      const allUsers  = await kvGet(kv, 'users', [])
+      for (const u of (Array.isArray(allUsers) ? allUsers : [])) {
+        const cfg = await kvGet(kv, `wa_config_${u.id}`, {})
+        if (cfg.webhookVerify && cfg.webhookVerify === verifyTok) {
+          return new Response(challenge, { status: 200, headers: { 'Content-Type': 'text/plain' } })
+        }
+      }
+      return new Response('Forbidden', { status: 403 })
+    }
+
+    // ── POST /api/wa/webhook — receive real WhatsApp messages from Meta ────
+    if (path === '/api/wa/webhook' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      // Process incoming messages from Meta webhook
+      const entry = body?.entry?.[0]
+      const changes = entry?.changes?.[0]
+      const value = changes?.value
+      if (value?.messages) {
+        for (const msg of value.messages) {
+          // Find user by phone number ID
+          const phoneId = value.metadata?.phone_number_id
+          const allUsers = await kvGet(kv, 'users', [])
+          for (const u of (Array.isArray(allUsers) ? allUsers : [])) {
+            const cfg = await kvGet(kv, `wa_config_${u.id}`, {})
+            if (cfg.phoneId === phoneId || !phoneId) {
+              const from     = msg.from   // sender's WhatsApp number
+              const msgId    = msg.id
+              const msgType  = msg.type   // text, image, audio, etc.
+              const body_txt = msg.text?.body || msg.caption || `[${msgType}]`
+              const ts       = new Date(parseInt(msg.timestamp || Date.now()/1000) * 1000).toISOString()
+
+              // Store in per-contact thread (same format as sent messages)
+              const threadKey = `wa_thread_${u.id}_${from}`
+              let thread = await kvGet(kv, threadKey, [])
+              if (!Array.isArray(thread)) thread = []
+              // Deduplicate by msgId
+              if (!thread.find(m => m.meta_id === msgId)) {
+                thread.push({
+                  id:      uuid(),
+                  meta_id: msgId,
+                  from,
+                  to:      cfg.phoneNumber || 'me',
+                  body:    body_txt,
+                  type:    msgType,
+                  sent_at: ts,
+                  status:  'received',
+                  incoming: true,
+                })
+                await kvSet(kv, threadKey, thread.slice(-500))
+
+                // Update contact unread + last message
+                let contacts = await kvGet(kv, `wa_contacts_${u.id}`, [])
+                if (!Array.isArray(contacts)) contacts = []
+                let ci = contacts.findIndex(c => c.phone === from)
+                if (ci === -1) {
+                  // Auto-create contact for unknown sender
+                  contacts.unshift({ id: uuid(), name: from, phone: from, avatar: null, addedAt: ts, lastMessage: body_txt, lastMessageAt: ts, unread: 1 })
+                } else {
+                  contacts[ci].lastMessage    = body_txt.slice(0, 80)
+                  contacts[ci].lastMessageAt  = ts
+                  contacts[ci].unread         = (contacts[ci].unread || 0) + 1
+                }
+                await kvSet(kv, `wa_contacts_${u.id}`, contacts.slice(0, 1000))
+              }
+              break
+            }
+          }
+        }
+      }
+      // Always return 200 to Meta or it will retry
+      return new Response('EVENT_RECEIVED', { status: 200 })
+    }
+
+    // ── POST /api/wa/send — REAL send via Meta Cloud API ──────────────────
+    if (path === '/api/wa/send' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { to, message, type = 'text' } = body
+      if (!to || !message) return json({ error: 'to and message are required' }, 400)
+
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      if (!cfg.phoneId || !cfg.token) {
+        return json({ error: 'WhatsApp Cloud API not configured. Go to Settings → WhatsApp to add your Phone ID and Token.' }, 400)
+      }
+
+      const normalised = to.replace(/[^+\d]/g, '')
+
+      // Call Meta Cloud API to send real WhatsApp message
+      let metaResponse = null, metaError = ''
+      try {
+        const metaRes = await fetch(
+          `https://graph.facebook.com/v19.0/${cfg.phoneId}/messages`,
+          {
+            method:  'POST',
+            headers: { 'Authorization': `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              messaging_product: 'whatsapp',
+              recipient_type:    'individual',
+              to:                normalised,
+              type:              'text',
+              text:              { preview_url: false, body: message },
+            }),
+            signal: AbortSignal.timeout(15000),
+          }
+        )
+        metaResponse = await metaRes.json()
+        if (metaResponse.error) metaError = metaResponse.error.message || 'Meta API error'
+      } catch (e) { metaError = e.message }
+
+      if (metaError) return json({ error: `WhatsApp send failed: ${metaError}` }, 502)
+
+      // Store in local thread
+      const msgId = metaResponse?.messages?.[0]?.id || uuid()
+      const msg = {
+        id:      uuid(),
+        meta_id: msgId,
+        from:    'me',
+        to:      normalised,
+        body:    message,
+        type:    'text',
+        sent_at: new Date().toISOString(),
+        status:  'sent',
+        incoming: false,
+      }
+      let thread = await kvGet(kv, `wa_thread_${user.id}_${normalised}`, [])
+      if (!Array.isArray(thread)) thread = []
+      thread.push(msg)
+      await kvSet(kv, `wa_thread_${user.id}_${normalised}`, thread.slice(-500))
+
+      // Update contact preview
+      let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
+      if (Array.isArray(contacts)) {
+        const idx = contacts.findIndex(c => c.phone === normalised)
+        if (idx !== -1) {
+          contacts[idx].lastMessage   = message.slice(0, 80)
+          contacts[idx].lastMessageAt = msg.sent_at
+          await kvSet(kv, `wa_contacts_${user.id}`, contacts)
+        }
+      }
+      return json({ ok: true, message: msg, metaMessageId: msgId })
+    }
+
+    // ── GET /api/wa/numbers — list all registered Meta phone numbers ───────
+    if (path === '/api/wa/numbers' && method === 'GET') {
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      if (!cfg.token || !cfg.wabaId) return json({ numbers: [], error: 'Not configured' })
+      try {
+        const r = await fetch(
+          `https://graph.facebook.com/v19.0/${cfg.wabaId}/phone_numbers?fields=display_phone_number,verified_name,status,quality_rating,id`,
+          { headers: { Authorization: `Bearer ${cfg.token}` }, signal: AbortSignal.timeout(10000) }
+        )
+        const d = await r.json()
+        return json({ numbers: d.data || [], error: d.error?.message || null })
+      } catch (e) { return json({ numbers: [], error: e.message }) }
+    }
+
+    // ── GET /api/wa/templates — list message templates from Meta ──────────
+    if (path === '/api/wa/templates' && method === 'GET') {
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      if (!cfg.token || !cfg.wabaId) return json({ templates: [], error: 'Not configured' })
+      try {
+        const r = await fetch(
+          `https://graph.facebook.com/v19.0/${cfg.wabaId}/message_templates?fields=name,status,language,components&limit=50`,
+          { headers: { Authorization: `Bearer ${cfg.token}` }, signal: AbortSignal.timeout(10000) }
+        )
+        const d = await r.json()
+        return json({ templates: d.data || [], error: d.error?.message || null })
+      } catch (e) { return json({ templates: [], error: e.message }) }
+    }
+
+    // ── POST /api/wa/broadcast — send template to multiple numbers ─────────
+    if (path === '/api/wa/broadcast' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { recipients, templateName, language = 'en_US', components = [] } = body
+      if (!recipients?.length || !templateName) return json({ error: 'recipients and templateName required' }, 400)
+
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      if (!cfg.phoneId || !cfg.token) return json({ error: 'WhatsApp Cloud API not configured' }, 400)
+
+      const results = []
+      // Send in batches to avoid rate limits
+      for (const phone of recipients.slice(0, 100)) {
+        try {
+          const r = await fetch(
+            `https://graph.facebook.com/v19.0/${cfg.phoneId}/messages`,
+            {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                to:    phone.replace(/[^+\d]/g, ''),
+                type:  'template',
+                template: { name: templateName, language: { code: language }, components },
+              }),
+              signal: AbortSignal.timeout(10000),
+            }
+          )
+          const d = await r.json()
+          results.push({ phone, status: d.error ? 'failed' : 'sent', messageId: d.messages?.[0]?.id, error: d.error?.message })
+        } catch (e) {
+          results.push({ phone, status: 'failed', error: e.message })
+        }
+      }
+      const sent   = results.filter(r => r.status === 'sent').length
+      const failed = results.filter(r => r.status === 'failed').length
+      return json({ ok: true, sent, failed, total: results.length, results })
+    }
+
+    // ── Legacy whatsapp-business endpoints (redirect to new /api/wa/) ──────
+    if (path === '/api/whatsapp-business/status' && method === 'GET') {
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      return json({ status: cfg.status || 'unconfigured', configured: !!(cfg.phoneId && cfg.token), phoneNumber: cfg.phoneNumber || '', displayName: cfg.displayName || '' })
+    }
     if (path === '/api/whatsapp-business/templates' && method === 'GET') {
-      const wbData = await kvGet(kv, `wb_${user.id}`, null)
-      const templates = wbData?.templates || ['OTP Verification','Welcome Message','Order Confirmed']
-      return json({ templates: templates.map((t, i) => ({ id: i+1, name: t, status: 'approved', language: 'en_US' })) })
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      if (!cfg.token || !cfg.wabaId) return json({ templates: [] })
+      try {
+        const r = await fetch(`https://graph.facebook.com/v19.0/${cfg.wabaId}/message_templates?fields=name,status&limit=50`, { headers: { Authorization: `Bearer ${cfg.token}` }, signal: AbortSignal.timeout(8000) })
+        const d = await r.json()
+        return json({ templates: (d.data||[]).map((t,i) => ({ id: i+1, name: t.name, status: t.status, language: 'en_US' })) })
+      } catch { return json({ templates: [] }) }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -2827,44 +3060,82 @@ export async function onRequest(context) {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // WHATSAPP SEND (real per-contact thread storage)
+    // WHATSAPP SEND — routes to REAL Meta Cloud API if configured,
+    // otherwise stores locally (for non-WA-Cloud contacts)
     // ══════════════════════════════════════════════════════════════════
 
     if (path === '/api/whatsapp/send' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      const { to, message, deviceId } = body
+      const { to, message, deviceId, useCloudApi = true } = body
       if (!to || !message) return json({ error: 'to and message required' }, 400)
-      const normalised = to.replace(/[\s\-().]/g, '')
-      const msg = {
-        id: uuid(),
-        from: 'me',
-        to: normalised,
-        body: message,
-        sent_at: new Date().toISOString(),
-        status: 'sent',
-        deviceId: deviceId || null,
+      const normalised = to.replace(/[^+\d]/g, '') || to.replace(/[\s\-().]/g, '')
+
+      // Try Meta Cloud API first if configured
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      let metaMessageId = null, sentViaCloudApi = false, sendError = ''
+
+      if (cfg.phoneId && cfg.token && useCloudApi) {
+        try {
+          const metaRes = await fetch(
+            `https://graph.facebook.com/v19.0/${cfg.phoneId}/messages`,
+            {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                messaging_product: 'whatsapp',
+                recipient_type: 'individual',
+                to: normalised,
+                type: 'text',
+                text: { preview_url: false, body: message },
+              }),
+              signal: AbortSignal.timeout(15000),
+            }
+          )
+          const metaData = await metaRes.json()
+          if (metaData.error) {
+            sendError = metaData.error.message || 'Meta API error'
+          } else {
+            metaMessageId   = metaData.messages?.[0]?.id
+            sentViaCloudApi = true
+          }
+        } catch (e) { sendError = e.message }
+
+        if (!sentViaCloudApi && sendError) {
+          return json({ error: `WhatsApp send failed: ${sendError}` }, 502)
+        }
       }
+
+      const msg = {
+        id:             uuid(),
+        meta_id:        metaMessageId || null,
+        from:           'me',
+        to:             normalised,
+        body:           message,
+        type:           'text',
+        sent_at:        new Date().toISOString(),
+        status:         sentViaCloudApi ? 'sent' : 'local',
+        via_cloud_api:  sentViaCloudApi,
+        deviceId:       deviceId || null,
+        incoming:       false,
+      }
+
       // Store in per-contact thread
       let thread = await kvGet(kv, `wa_thread_${user.id}_${normalised}`, [])
       if (!Array.isArray(thread)) thread = []
       thread.push(msg)
       await kvSet(kv, `wa_thread_${user.id}_${normalised}`, thread.slice(-500))
+
       // Update contact last message preview
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (Array.isArray(contacts)) {
         const idx = contacts.findIndex(c => c.phone === normalised)
         if (idx !== -1) {
-          contacts[idx].lastMessage = message.slice(0, 80)
+          contacts[idx].lastMessage   = message.slice(0, 80)
           contacts[idx].lastMessageAt = msg.sent_at
           await kvSet(kv, `wa_contacts_${user.id}`, contacts)
         }
       }
-      // Also keep in legacy outbox for stats
-      const outbox = await kvGet(kv, `wa_outbox_${user.id}`, [])
-      const oArr = Array.isArray(outbox) ? outbox : []
-      oArr.unshift(msg)
-      await kvSet(kv, `wa_outbox_${user.id}`, oArr.slice(0, 500))
-      return json({ ok: true, message: msg })
+      return json({ ok: true, message: msg, sentViaCloudApi, metaMessageId })
     }
 
     // ══════════════════════════════════════════════════════════════════
