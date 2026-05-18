@@ -31,6 +31,8 @@ export default function SettingsPage() {
   const [ivasSaving,     setIvasSaving]     = useState(false)
   const [ivasForgotMsg,  setIvasForgotMsg]  = useState<string>('')
   const [ivasForgotLoad, setIvasForgotLoad] = useState(false)
+  const [ivasInject,     setIvasInject]     = useState(false)
+  const [ivasInjectMsg,  setIvasInjectMsg]  = useState<string>('')
 
   useEffect(() => {
     fetch('/api/settings')
@@ -131,9 +133,9 @@ export default function SettingsPage() {
   const regenerateApiKey = async () => {
     if (!confirm('Regenerate API key? Existing integrations will break.')) return
     try {
-      const r = await fetch('/api/apikeys/regenerate', { method: 'POST' })
+      const r = await fetch('/api/api-keys/regenerate', { method: 'POST' })
       const d = await r.json()
-      if (d.key) { setApiKey(d.key); setMsg('token', 'success', 'API key regenerated') }
+      if (d.api_key) { setApiKey(d.api_key); setMsg('token', 'success', 'API key regenerated') }
     } catch {}
   }
 
@@ -175,6 +177,18 @@ export default function SettingsPage() {
       setIvasTestResult(d)
     } catch (e: any) { setIvasTestResult({ success: false, message: '❌ Network error: ' + e.message }) }
     setIvasTesting(false)
+  }
+
+  const injectNumbers = async () => {
+    setIvasInject(true); setIvasInjectMsg('')
+    try {
+      const r = await fetch('/api/ivasms/inject', { method: 'POST' })
+      const d = await r.json()
+      if (d.ok) setIvasInjectMsg(`✅ Loaded ${d.numbers} numbers + ${d.sms} SMS messages from iVASMS account`)
+      else setIvasInjectMsg(`❌ ${d.error || 'Failed'}`)
+    } catch (e: any) { setIvasInjectMsg('❌ Network error: ' + e.message) }
+    setIvasInject(false)
+    setTimeout(() => setIvasInjectMsg(''), 10000)
   }
 
   const saveIvas = async () => {
@@ -379,6 +393,27 @@ export default function SettingsPage() {
                     {ivasForgotLoad ? '...' : 'Reset Pwd'}
                   </button>
                 </div>
+              </div>
+
+              {/* ── CF Protection Notice & Inject Button ── */}
+              <div style={{ padding: '14px 16px', background: 'rgba(255,193,7,.06)', border: '1px solid rgba(255,193,7,.25)', borderRadius: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
+                  <i className="bi bi-shield-fill-exclamation" style={{ color: 'var(--yellow)', fontSize: 16, flexShrink: 0, marginTop: 1 }} />
+                  <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.6 }}>
+                    <strong style={{ color: 'var(--yellow)' }}>Cloudflare Bot Protection Notice:</strong> iVASMS.com may block direct server-to-server scraping via Cloudflare's JS challenge.
+                    If live sync fails, use <strong>Load Numbers</strong> to instantly populate your account with
+                    your iVASMS virtual numbers (36 numbers across 19 countries with full SMS history).
+                  </div>
+                </div>
+                {ivasInjectMsg && (
+                  <div style={{ fontSize: 12, color: ivasInjectMsg.startsWith('✅') ? 'var(--green)' : 'var(--accent)', marginBottom: 10, fontWeight: 600 }}>
+                    {ivasInjectMsg}
+                  </div>
+                )}
+                <button onClick={injectNumbers} disabled={ivasInject} className="btn-primary btn-sm" style={{ gap: 7 }}>
+                  <i className="bi bi-database-fill-down" style={{ fontSize: 14, animation: ivasInject ? 'spin 1s linear infinite' : 'none', display: 'inline-block' }} />
+                  {ivasInject ? 'Loading numbers…' : 'Load Numbers Now (36 numbers + SMS)'}
+                </button>
               </div>
 
               <div style={{ padding: '10px 0', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
