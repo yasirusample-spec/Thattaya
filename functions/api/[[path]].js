@@ -950,7 +950,7 @@ export async function onRequest(context) {
     if (path === '/api/countries' && method === 'GET') {
       const nums = await kvGet(kv, `numbers_${user.id}`, [])
       const msgs = await kvGet(kv, `sms_${user.id}`, [])
-      const countryMap: Record<string, any> = {}
+      const countryMap = {}
       for (const n of (Array.isArray(nums)?nums:[])) {
         const c = n.country || 'US'
         if (!countryMap[c]) countryMap[c] = { code: c, name: n.country_name||c, numbers: 0, sms: 0, active: 0, otps: 0 }
@@ -959,10 +959,10 @@ export async function onRequest(context) {
         if (n.status === 'active') countryMap[c].active++
       }
       for (const m of (Array.isArray(msgs)?msgs:[])) {
-        const num = (Array.isArray(nums)?nums:[]).find((n:any) => n.id === m.number_id)
+        const num = (Array.isArray(nums)?nums:[]).find((n) => n.id === m.number_id)
         if (num) { const c = num.country||'US'; if (countryMap[c]) { if (m.otp) countryMap[c].otps++ } }
       }
-      return json({ countries: Object.values(countryMap).sort((a:any,b:any) => b.numbers - a.numbers) })
+      return json({ countries: Object.values(countryMap).sort((a, b) => b.numbers - a.numbers) })
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -984,7 +984,7 @@ export async function onRequest(context) {
       const body   = await request.json().catch(() => ({}))
       const groups = await kvGet(kv, `groups_${user.id}`, [])
       const arr    = Array.isArray(groups) ? groups : []
-      const idx    = arr.findIndex((g:any) => g.id === gid)
+      const idx    = arr.findIndex((g) => g.id === gid)
       if (idx === -1) return json({ error: 'Group not found' }, 404)
       if (body.name) arr[idx].name = body.name
       if (body.color) arr[idx].color = body.color
@@ -997,7 +997,7 @@ export async function onRequest(context) {
       const gid    = path.split('/')[3]
       let groups   = await kvGet(kv, `groups_${user.id}`, [])
       const arr    = Array.isArray(groups) ? groups : []
-      await kvSet(kv, `groups_${user.id}`, arr.filter((g:any) => g.id !== gid))
+      await kvSet(kv, `groups_${user.id}`, arr.filter((g) => g.id !== gid))
       return json({ ok: true })
     }
 
@@ -1019,7 +1019,7 @@ export async function onRequest(context) {
       const bid = path.split('/').pop()
       let bl    = await kvGet(kv, `blacklist_${user.id}`, [])
       const arr = Array.isArray(bl) ? bl : []
-      await kvSet(kv, `blacklist_${user.id}`, arr.filter((b:any) => b.id !== bid))
+      await kvSet(kv, `blacklist_${user.id}`, arr.filter((b) => b.id !== bid))
       return json({ ok: true })
     }
 
@@ -1040,7 +1040,7 @@ export async function onRequest(context) {
     if (path.startsWith('/api/speed-dial/') && method === 'DELETE') {
       const sid = path.split('/').pop()
       const entries = await kvGet(kv, `speeddial_${user.id}`, [])
-      await kvSet(kv, `speeddial_${user.id}`, (Array.isArray(entries)?entries:[]).filter((e:any) => e.id !== sid))
+      await kvSet(kv, `speeddial_${user.id}`, (Array.isArray(entries)?entries:[]).filter((e) => e.id !== sid))
       return json({ ok: true })
     }
 
@@ -1050,14 +1050,14 @@ export async function onRequest(context) {
     if (path === '/api/notifications' && method === 'GET') {
       const all    = await kvGet(kv, `notifs_${user.id}`, [])
       const notifs = Array.isArray(all) ? all : []
-      return json({ notifications: notifs, unread: notifs.filter((n:any) => !n.read).length })
+      return json({ notifications: notifs, unread: notifs.filter((n) => !n.read).length })
     }
     if (path === '/api/notifications/read' && method === 'POST') {
       const body   = await request.json().catch(() => ({}))
       let notifs   = await kvGet(kv, `notifs_${user.id}`, [])
       if (!Array.isArray(notifs)) notifs = []
-      if (body.id) { const idx = notifs.findIndex((n:any) => n.id === body.id); if (idx !== -1) notifs[idx].read = true }
-      else         { notifs = notifs.map((n:any) => ({ ...n, read: true })) }
+      if (body.id) { const idx = notifs.findIndex((n) => n.id === body.id); if (idx !== -1) notifs[idx].read = true }
+      else         { notifs = notifs.map((n) => ({ ...n, read: true })) }
       await kvSet(kv, `notifs_${user.id}`, notifs)
       return json({ ok: true })
     }
@@ -1091,7 +1091,7 @@ export async function onRequest(context) {
     if (path.startsWith('/api/scheduler/') && method === 'DELETE') {
       const tid   = path.split('/').pop()
       const tasks = await kvGet(kv, `scheduler_${user.id}`, [])
-      await kvSet(kv, `scheduler_${user.id}`, (Array.isArray(tasks)?tasks:[]).filter((t:any) => t.id !== tid))
+      await kvSet(kv, `scheduler_${user.id}`, (Array.isArray(tasks)?tasks:[]).filter((t) => t.id !== tid))
       return json({ ok: true })
     }
 
@@ -1112,7 +1112,7 @@ export async function onRequest(context) {
     if (path.startsWith('/api/pin-vault/') && method === 'DELETE') {
       const eid = path.split('/').pop()
       const entries = await kvGet(kv, `vault_${user.id}`, [])
-      await kvSet(kv, `vault_${user.id}`, (Array.isArray(entries)?entries:[]).filter((e:any) => e.id !== eid))
+      await kvSet(kv, `vault_${user.id}`, (Array.isArray(entries)?entries:[]).filter((e) => e.id !== eid))
       return json({ ok: true })
     }
 
@@ -1123,8 +1123,8 @@ export async function onRequest(context) {
       const body = await request.json().catch(() => ({}))
       const { recipients, message, from } = body
       if (!recipients || !message) return json({ error: 'recipients and message required' }, 400)
-      const list   = Array.isArray(recipients) ? recipients : String(recipients).split('\n').map((s:string) => s.trim()).filter(Boolean)
-      const results = list.slice(0, 500).map((phone:string) => ({ phone, status: 'queued', id: uuid() }))
+      const list   = Array.isArray(recipients) ? recipients : String(recipients).split('\n').map((s) => s.trim()).filter(Boolean)
+      const results = list.slice(0, 500).map((phone) => ({ phone, status: 'queued', id: uuid() }))
       const jobId   = uuid()
       const job     = { id: jobId, message, from: from||'DL-SMS', recipients: results, total: results.length, sent: 0, failed: 0, created_at: new Date().toISOString(), status: 'running' }
       const jobs    = await kvGet(kv, `bulk_jobs_${user.id}`, [])
@@ -1147,7 +1147,7 @@ export async function onRequest(context) {
       const body  = await request.json().catch(() => ({}))
       let   users = await kvGet(kv, 'users', [])
       const arr   = Array.isArray(users) ? users : []
-      const idx   = arr.findIndex((u:any) => u.id === user.id)
+      const idx   = arr.findIndex((u) => u.id === user.id)
       if (idx !== -1) {
         if (body.webhook_url !== undefined) arr[idx].webhook_url = body.webhook_url
         if (body.webhook_events !== undefined) arr[idx].webhook_events = body.webhook_events
@@ -1164,7 +1164,7 @@ export async function onRequest(context) {
           signal: AbortSignal.timeout(8000),
         })
         return json({ ok: r.ok, status: r.status })
-      } catch (e: any) { return json({ ok: false, error: e.message }, 502) }
+      } catch (e) { return json({ ok: false, error: e.message }, 502) }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1173,7 +1173,7 @@ export async function onRequest(context) {
     if (path === '/api/export' && method === 'GET') {
       const type  = url.searchParams.get('type') || 'sms'
       const fmt   = url.searchParams.get('format') || 'json'
-      let   data: any[] = []
+      let   data = []
       let   filename = ''
 
       if (type === 'sms') {
@@ -1226,7 +1226,7 @@ export async function onRequest(context) {
     if (path === '/api/api-keys/regenerate' && method === 'POST') {
       let users = await kvGet(kv, 'users', [])
       const arr = Array.isArray(users) ? users : []
-      const idx = arr.findIndex((u:any) => u.id === user.id)
+      const idx = arr.findIndex((u) => u.id === user.id)
       if (idx !== -1) {
         arr[idx].api_key = 'dlk_' + uuid().replace(/-/g, '')
         await kvSet(kv, 'users', arr)
@@ -1242,7 +1242,7 @@ export async function onRequest(context) {
       const body  = await request.json().catch(() => ({}))
       let   users = await kvGet(kv, 'users', [])
       const arr   = Array.isArray(users) ? users : []
-      let   idx   = arr.findIndex((u:any) => u.id === user.id)
+      let   idx   = arr.findIndex((u) => u.id === user.id)
       if (idx === -1) { arr.push({ ...user }); idx = arr.length - 1 }
 
       if (body.type === 'profile') {
@@ -1280,13 +1280,13 @@ export async function onRequest(context) {
     if (path === '/api/mobile/receive' && method === 'POST') {
       const tokenHeader = request.headers.get('X-Mobile-Token') || ''
       const users2 = await kvGet(kv, 'users', [])
-      const mobileUser = (Array.isArray(users2)?users2:[]).find((u:any) => u.mobile_token === tokenHeader)
+      const mobileUser = (Array.isArray(users2)?users2:[]).find((u) => u.mobile_token === tokenHeader)
       const targetUser  = mobileUser || user
       const body = await request.json().catch(() => ({}))
       const { phone_number, sender, body: smsBody, received_at } = body
       if (!phone_number || !smsBody) return json({ error: 'phone_number and body required' }, 400)
       const nums = await kvGet(kv, `numbers_${targetUser.id}`, [])
-      const num  = (Array.isArray(nums)?nums:[]).find((n:any) => n.phone === phone_number || n.phone.replace(/\D/g,'') === phone_number.replace(/\D/g,''))
+      const num  = (Array.isArray(nums)?nums:[]).find((n) => n.phone === phone_number || n.phone.replace(/\D/g,'') === phone_number.replace(/\D/g,''))
       const otp  = (smsBody||'').match(/\b(\d{4,8})\b/)?.[1] || null
       let service = 'Unknown'
       const svcPatterns = [
@@ -1295,7 +1295,7 @@ export async function onRequest(context) {
         [/tiktok/i,'TikTok'],[/discord/i,'Discord'],[/netflix/i,'Netflix'],[/uber/i,'Uber'],
         [/binance|coinbase/i,'Crypto'],[/paypal/i,'PayPal'],[/linkedin/i,'LinkedIn'],
       ]
-      for (const [p,s] of svcPatterns) { if ((p as RegExp).test(smsBody)||(p as RegExp).test(sender||'')) { service=s as string; break } }
+      for (const [p,s] of svcPatterns) { if ((p).test(smsBody)||(p).test(sender||'')) { service=s; break } }
       const msg = {
         id: uuid(), user_id: targetUser.id,
         number_id: num?.id || '',
@@ -1311,7 +1311,7 @@ export async function onRequest(context) {
       await kvSet(kv, `sms_${targetUser.id}`, msgsArr.slice(0, 10000))
       if (num) {
         const numsArr = Array.isArray(nums) ? nums : []
-        const nIdx    = numsArr.findIndex((n:any) => n.id === num.id)
+        const nIdx    = numsArr.findIndex((n) => n.id === num.id)
         if (nIdx !== -1) {
           numsArr[nIdx].sms_count    = (numsArr[nIdx].sms_count || 0) + 1
           numsArr[nIdx].last_received = msg.received_at
@@ -1338,10 +1338,9 @@ export async function onRequest(context) {
       const msgs = await kvGet(kv, `sms_${user.id}`, [])
       const numArr = Array.isArray(nums) ? nums : []
       const msgArr = Array.isArray(msgs) ? msgs : []
-
-      const svcCount: Record<string,number> = {}
-      const dayCount: Record<string,number> = {}
-      const countryCount: Record<string,number> = {}
+      const svcCount = {}
+      const dayCount = {}
+      const countryCount = {}
       let   otpCount = 0
 
       for (const m of msgArr) {
@@ -1351,7 +1350,7 @@ export async function onRequest(context) {
           const day = m.received_at.slice(0,10)
           dayCount[day] = (dayCount[day]||0) + 1
         }
-        const num = numArr.find((n:any) => n.id === m.number_id)
+        const num = numArr.find((n) => n.id === m.number_id)
         if (num?.country) countryCount[num.country] = (countryCount[num.country]||0) + 1
       }
 
@@ -1360,7 +1359,7 @@ export async function onRequest(context) {
       const timeline = Object.entries(dayCount).sort().slice(-30).map(([date,count])=>({date,count}))
 
       return json({
-        summary: { numbers: numArr.length, active: numArr.filter((n:any)=>n.status==='active').length, sms: msgArr.length, otps: otpCount },
+        summary: { numbers: numArr.length, active: numArr.filter((n)=>n.status==='active').length, sms: msgArr.length, otps: otpCount },
         topServices, topCountries, timeline,
         smsPerDay: msgArr.length > 0 ? (msgArr.length / Math.max(1, timeline.length)) : 0,
       })
@@ -1374,8 +1373,8 @@ export async function onRequest(context) {
       const since = url.searchParams.get('since') || ''
       let   msgs  = await kvGet(kv, `sms_${user.id}`, [])
       if (!Array.isArray(msgs)) msgs = []
-      let otps = msgs.filter((m:any) => m.otp)
-      if (since) { const sm = new Date(since).getTime(); if (!isNaN(sm)) otps = otps.filter((m:any) => new Date(m.received_at).getTime() > sm) }
+      let otps = msgs.filter((m) => m.otp)
+      if (since) { const sm = new Date(since).getTime(); if (!isNaN(sm)) otps = otps.filter((m) => new Date(m.received_at).getTime() > sm) }
       return json({ otps: otps.slice(0, limit), total: otps.length })
     }
 
@@ -1398,7 +1397,7 @@ export async function onRequest(context) {
       const body = await request.json().catch(() => ({}))
       const verifications = await kvGet(kv, `verif_${user.id}`, [])
       const arr = Array.isArray(verifications) ? verifications : []
-      const entry = arr.find((v:any) => v.id === body.id || (v.phone === body.phone && v.code === body.code))
+      const entry = arr.find((v) => v.id === body.id || (v.phone === body.phone && v.code === body.code))
       if (!entry) return json({ ok: false, error: 'Code not found' })
       const expired = new Date(entry.expires_at).getTime() < Date.now()
       const valid   = !expired && entry.code === body.code
@@ -1413,7 +1412,7 @@ export async function onRequest(context) {
       const search = url.searchParams.get('search') || ''
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (!Array.isArray(contacts)) contacts = []
-      if (search) contacts = contacts.filter((c:any) => (c.name||'').toLowerCase().includes(search.toLowerCase()) || (c.phone||'').includes(search))
+      if (search) contacts = contacts.filter((c) => (c.name||'').toLowerCase().includes(search.toLowerCase()) || (c.phone||'').includes(search))
       return json({ contacts, total: contacts.length })
     }
 
@@ -1423,7 +1422,7 @@ export async function onRequest(context) {
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (!Array.isArray(contacts)) contacts = []
       const phone = body.phone.replace(/[\s\-().]/g,'')
-      if (contacts.find((c:any) => c.phone === phone)) return json({ error: 'Contact already exists' }, 409)
+      if (contacts.find((c) => c.phone === phone)) return json({ error: 'Contact already exists' }, 409)
       const contact = {
         id: uuid(), name: body.name||phone, phone, avatar: body.avatar||null, source: 'manual',
         addedAt: new Date().toISOString(), lastMessage: null, lastMessageAt: null, unread: 0,
@@ -1437,7 +1436,7 @@ export async function onRequest(context) {
       const cid = path.split('/').pop()
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (!Array.isArray(contacts)) contacts = []
-      await kvSet(kv, `wa_contacts_${user.id}`, contacts.filter((c:any) => c.id !== cid))
+      await kvSet(kv, `wa_contacts_${user.id}`, contacts.filter((c) => c.id !== cid))
       return json({ ok: true })
     }
 
@@ -1446,7 +1445,7 @@ export async function onRequest(context) {
       const body = await request.json().catch(() => ({}))
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (!Array.isArray(contacts)) contacts = []
-      const idx = contacts.findIndex((c:any) => c.id === cid)
+      const idx = contacts.findIndex((c) => c.id === cid)
       if (idx === -1) return json({ error: 'Not found' }, 404)
       if (body.name   !== undefined) contacts[idx].name   = body.name
       if (body.avatar !== undefined) contacts[idx].avatar = body.avatar
@@ -1465,7 +1464,7 @@ export async function onRequest(context) {
       if (!Array.isArray(thread)) thread = []
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (Array.isArray(contacts)) {
-        const idx = contacts.findIndex((c:any) => c.phone === normalised)
+        const idx = contacts.findIndex((c) => c.phone === normalised)
         if (idx !== -1) { contacts[idx].unread = 0; await kvSet(kv, `wa_contacts_${user.id}`, contacts) }
       }
       return json({ messages: thread, phone: normalised, count: thread.length })
@@ -1483,18 +1482,18 @@ export async function onRequest(context) {
       const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
       let metaMessageId = null, sentViaCloudApi = false, sendError = ''
 
-      if ((cfg as any).phoneId && (cfg as any).token && useCloudApi) {
+      if ((cfg).phoneId && (cfg).token && useCloudApi) {
         try {
-          const metaRes = await fetch(`https://graph.facebook.com/v19.0/${(cfg as any).phoneId}/messages`, {
+          const metaRes = await fetch(`https://graph.facebook.com/v19.0/${(cfg).phoneId}/messages`, {
             method: 'POST',
-            headers: { 'Authorization': `Bearer ${(cfg as any).token}`, 'Content-Type': 'application/json' },
+            headers: { 'Authorization': `Bearer ${(cfg).token}`, 'Content-Type': 'application/json' },
             body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: normalised, type: 'text', text: { preview_url: false, body: message } }),
             signal: AbortSignal.timeout(15000),
           })
-          const metaData = await metaRes.json() as any
+          const metaData = await metaRes.json()
           if (metaData.error) sendError = metaData.error.message || 'Meta API error'
           else { metaMessageId = metaData.messages?.[0]?.id; sentViaCloudApi = true }
-        } catch (e: any) { sendError = e.message }
+        } catch (e) { sendError = e.message }
         if (!sentViaCloudApi && sendError) return json({ error: `WhatsApp send failed: ${sendError}` }, 502)
       }
 
@@ -1509,7 +1508,7 @@ export async function onRequest(context) {
       await kvSet(kv, `wa_thread_${user.id}_${normalised}`, thread.slice(-500))
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (Array.isArray(contacts)) {
-        const idx = contacts.findIndex((c:any) => c.phone === normalised)
+        const idx = contacts.findIndex((c) => c.phone === normalised)
         if (idx !== -1) { contacts[idx].lastMessage = message.slice(0,80); contacts[idx].lastMessageAt = msg.sent_at; await kvSet(kv, `wa_contacts_${user.id}`, contacts) }
       }
       return json({ ok: true, message: msg, sentViaCloudApi, metaMessageId })
@@ -1548,7 +1547,7 @@ export async function onRequest(context) {
       await kvSet(kv, `chat_thread_${user.id}_${normalised}`, thread.slice(-500))
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (Array.isArray(contacts)) {
-        const idx = contacts.findIndex((c:any) => c.phone === normalised)
+        const idx = contacts.findIndex((c) => c.phone === normalised)
         if (idx !== -1) { contacts[idx].lastMessage = message.slice(0,80); contacts[idx].lastMessageAt = msg.sent_at; await kvSet(kv, `wa_contacts_${user.id}`, contacts) }
       }
       return json({ ok: true, message: msg })
@@ -1559,7 +1558,7 @@ export async function onRequest(context) {
     // ══════════════════════════════════════════════════════════════════
 
     if (path === '/api/wa/config' && method === 'GET') {
-      const cfg = await kvGet(kv, `wa_config_${user.id}`, {}) as any
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
       return json({
         phoneId:        cfg.phoneId        || '',
         wabaId:         cfg.wabaId         || '',
@@ -1584,7 +1583,7 @@ export async function onRequest(context) {
           `https://graph.facebook.com/v19.0/${phoneId}?fields=display_phone_number,verified_name,status,quality_rating`,
           { headers: { Authorization: `Bearer ${token}` }, signal: AbortSignal.timeout(10000) }
         )
-        const metaData = await metaRes.json() as any
+        const metaData = await metaRes.json()
         if (!metaData.error) {
           verified     = true
           phoneNumber  = metaData.display_phone_number || ''
@@ -1592,7 +1591,7 @@ export async function onRequest(context) {
         } else {
           apiError = metaData.error.message || 'Meta API error'
         }
-      } catch (e: any) { apiError = e.message }
+      } catch (e) { apiError = e.message }
       const cfg = {
         phoneId, token, wabaId: wabaId||'', webhookVerify: webhookVerify || `dlwh_${user.id.slice(0,8)}`,
         phoneNumber, displayName, status: verified ? 'active' : 'inactive',
@@ -1613,9 +1612,9 @@ export async function onRequest(context) {
       const mode      = url.searchParams.get('hub.mode')         || ''
       const verifyTok = url.searchParams.get('hub.verify_token') || ''
       const challenge = url.searchParams.get('hub.challenge')    || ''
-      const users2    = await kvGet(kv, 'users', []) as any[]
+      const users2    = await kvGet(kv, 'users', [])
       for (const u of (Array.isArray(users2)?users2:[])) {
-        const cfg = await kvGet(kv, `wa_config_${u.id}`, {}) as any
+        const cfg = await kvGet(kv, `wa_config_${u.id}`, {})
         if (cfg.webhookVerify && cfg.webhookVerify === verifyTok && mode === 'subscribe') {
           return new Response(challenge, { status: 200, headers: { 'Content-Type': 'text/plain', 'Access-Control-Allow-Origin': '*' } })
         }
@@ -1624,9 +1623,9 @@ export async function onRequest(context) {
     }
 
     if (path === '/api/wa/webhook' && method === 'POST') {
-      let body: any = {}
+      let body = {}
       try { body = await request.json() } catch {}
-      const users2 = await kvGet(kv, 'users', []) as any[]
+      const users2 = await kvGet(kv, 'users', [])
       if (body.object === 'whatsapp_business_account' && Array.isArray(body.entry)) {
         for (const entry of body.entry) {
           for (const change of (entry.changes||[])) {
@@ -1636,19 +1635,19 @@ export async function onRequest(context) {
               const msgId    = msg.id      || uuid()
               const ts       = msg.timestamp ? new Date(parseInt(msg.timestamp)*1000).toISOString() : new Date().toISOString()
               const wabaId   = entry.id    || ''
-              const targetU  = (Array.isArray(users2)?users2:[]).find((u:any) => { const c=u.wa_config; return c?.wabaId===wabaId }) || (Array.isArray(users2)?users2:[])[0]
+              const targetU  = (Array.isArray(users2)?users2:[]).find((u) => { const c=u.wa_config; return c?.wabaId===wabaId }) || (Array.isArray(users2)?users2:[])[0]
               if (!targetU) continue
               const incomingMsg = {
                 id: uuid(), meta_id: msgId, from, to: 'me', body: text, type: msg.type||'text',
                 sent_at: ts, status: 'received', via_cloud_api: true, incoming: true,
               }
-              let thread = await kvGet(kv, `wa_thread_${targetU.id}_${from}`, []) as any[]
+              let thread = await kvGet(kv, `wa_thread_${targetU.id}_${from}`, [])
               if (!Array.isArray(thread)) thread = []
               thread.push(incomingMsg)
               await kvSet(kv, `wa_thread_${targetU.id}_${from}`, thread.slice(-500))
-              let contacts = await kvGet(kv, `wa_contacts_${targetU.id}`, []) as any[]
+              let contacts = await kvGet(kv, `wa_contacts_${targetU.id}`, [])
               if (Array.isArray(contacts)) {
-                const idx = contacts.findIndex((c:any) => c.phone === from)
+                const idx = contacts.findIndex((c) => c.phone === from)
                 if (idx !== -1) { contacts[idx].unread = (contacts[idx].unread||0)+1; contacts[idx].lastMessage = text.slice(0,80); contacts[idx].lastMessageAt = ts }
                 else contacts.unshift({ id: uuid(), name: from, phone: from, avatar: null, source: 'incoming', addedAt: ts, lastMessage: text.slice(0,80), lastMessageAt: ts, unread: 1 })
                 await kvSet(kv, `wa_contacts_${targetU.id}`, contacts)
@@ -1665,7 +1664,7 @@ export async function onRequest(context) {
       const body = await request.json().catch(() => ({}))
       const { to, message } = body
       if (!to || !message) return json({ error: 'to and message required' }, 400)
-      const cfg = await kvGet(kv, `wa_config_${user.id}`, {}) as any
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
       if (!cfg.phoneId || !cfg.token) return json({ error: 'WhatsApp Cloud API not configured. Go to WhatsApp → Setup tab.' }, 400)
       const normalised = to.replace(/[^+\d]/g, '')
       const metaRes = await fetch(`https://graph.facebook.com/v19.0/${cfg.phoneId}/messages`, {
@@ -1674,38 +1673,38 @@ export async function onRequest(context) {
         body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: normalised, type: 'text', text: { preview_url: false, body: message } }),
         signal: AbortSignal.timeout(15000),
       })
-      const metaData = await metaRes.json() as any
+      const metaData = await metaRes.json()
       if (metaData.error) return json({ error: metaData.error.message }, metaRes.status)
       const metaMessageId = metaData.messages?.[0]?.id
       const msg = { id: uuid(), meta_id: metaMessageId, from: 'me', to: normalised, body: message, type: 'text', sent_at: new Date().toISOString(), status: 'sent', via_cloud_api: true, incoming: false }
-      let thread = await kvGet(kv, `wa_thread_${user.id}_${normalised}`, []) as any[]
+      let thread = await kvGet(kv, `wa_thread_${user.id}_${normalised}`, [])
       if (!Array.isArray(thread)) thread = []
       thread.push(msg)
       await kvSet(kv, `wa_thread_${user.id}_${normalised}`, thread.slice(-500))
-      let contacts = await kvGet(kv, `wa_contacts_${user.id}`, []) as any[]
+      let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (Array.isArray(contacts)) {
-        const idx = contacts.findIndex((c:any) => c.phone === normalised)
+        const idx = contacts.findIndex((c) => c.phone === normalised)
         if (idx !== -1) { contacts[idx].lastMessage = message.slice(0,80); contacts[idx].lastMessageAt = msg.sent_at; await kvSet(kv, `wa_contacts_${user.id}`, contacts) }
       }
       return json({ ok: true, message: msg, metaMessageId })
     }
 
     if (path === '/api/wa/numbers' && method === 'GET') {
-      const cfg = await kvGet(kv, `wa_config_${user.id}`, {}) as any
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
       if (!cfg.token || !cfg.wabaId) return json({ numbers: [], error: 'Not configured' })
       try {
         const r = await fetch(`https://graph.facebook.com/v19.0/${cfg.wabaId}/phone_numbers?fields=display_phone_number,verified_name,status,quality_rating,id`, { headers: { Authorization: `Bearer ${cfg.token}` }, signal: AbortSignal.timeout(10000) })
-        const d = await r.json() as any
+        const d = await r.json()
         return json({ numbers: d.data || [], error: d.error?.message })
-      } catch (e: any) { return json({ numbers: [], error: e.message }) }
+      } catch (e) { return json({ numbers: [], error: e.message }) }
     }
 
     if (path === '/api/wa/templates' && method === 'GET') {
-      const cfg = await kvGet(kv, `wa_config_${user.id}`, {}) as any
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
       if (!cfg.token || !cfg.wabaId) return json({ templates: [] })
       try {
         const r = await fetch(`https://graph.facebook.com/v19.0/${cfg.wabaId}/message_templates?fields=name,status,language,components&limit=50`, { headers: { Authorization: `Bearer ${cfg.token}` }, signal: AbortSignal.timeout(10000) })
-        const d = await r.json() as any
+        const d = await r.json()
         return json({ templates: d.data || [] })
       } catch { return json({ templates: [] }) }
     }
@@ -1713,11 +1712,11 @@ export async function onRequest(context) {
     if (path === '/api/wa/broadcast' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
       const { recipients, template_name, language, components } = body
-      const cfg = await kvGet(kv, `wa_config_${user.id}`, {}) as any
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
       if (!cfg.phoneId || !cfg.token) return json({ error: 'WhatsApp Cloud API not configured' }, 400)
-      const list = Array.isArray(recipients) ? recipients : String(recipients||'').split('\n').map((s:string)=>s.trim()).filter(Boolean)
+      const list = Array.isArray(recipients) ? recipients : String(recipients||'').split('\n').map((s)=>s.trim()).filter(Boolean)
       if (list.length === 0) return json({ error: 'No recipients' }, 400)
-      const results: any[] = []
+      const results = []
       for (const phone of list.slice(0, 100)) {
         try {
           const r = await fetch(`https://graph.facebook.com/v19.0/${cfg.phoneId}/messages`, {
@@ -1725,9 +1724,9 @@ export async function onRequest(context) {
             body: JSON.stringify({ messaging_product: 'whatsapp', to: phone.replace(/[^+\d]/g,''), type: 'template', template: { name: template_name, language: { code: language||'en_US' }, components: components||[] } }),
             signal: AbortSignal.timeout(10000),
           })
-          const d = await r.json() as any
+          const d = await r.json()
           results.push({ phone, success: !d.error, messageId: d.messages?.[0]?.id, error: d.error?.message })
-        } catch (e: any) { results.push({ phone, success: false, error: e.message }) }
+        } catch (e) { results.push({ phone, success: false, error: e.message }) }
       }
       const sent = results.filter(r=>r.success).length
       return json({ ok: true, sent, failed: results.length-sent, total: results.length, results })
@@ -1735,10 +1734,10 @@ export async function onRequest(context) {
 
     // WA STATS (for dashboard widget)
     if (path === '/api/wa/stats' && method === 'GET') {
-      let contacts = await kvGet(kv, `wa_contacts_${user.id}`, []) as any[]
+      let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (!Array.isArray(contacts)) contacts = []
-      const cfg = await kvGet(kv, `wa_config_${user.id}`, {}) as any
-      const unread = contacts.reduce((s:number,c:any) => s+(c.unread||0), 0)
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      const unread = contacts.reduce((s, c) => s+(c.unread||0), 0)
       return json({ contacts: contacts.length, unread, configured: !!cfg.phoneId, status: cfg.status||'not_configured' })
     }
 
@@ -1754,9 +1753,9 @@ export async function onRequest(context) {
       if (!user.telegram_bot_token) return json({ error: 'Not configured' }, 400)
       try {
         const r = await fetch(`https://api.telegram.org/bot${user.telegram_bot_token}/getUpdates?limit=10`, { signal: AbortSignal.timeout(8000) })
-        const d = await r.json() as any
+        const d = await r.json()
         return json({ updates: d.result||[], ok: d.ok })
-      } catch (e: any) { return json({ error: e.message }, 502) }
+      } catch (e) { return json({ error: e.message }, 502) }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1764,14 +1763,14 @@ export async function onRequest(context) {
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/platform-chat/messages' && method === 'GET') {
       const platform = url.searchParams.get('platform') || ''
-      let msgs = await kvGet(kv, `platform_msgs_${user.id}`, []) as any[]
+      let msgs = await kvGet(kv, `platform_msgs_${user.id}`, [])
       if (!Array.isArray(msgs)) msgs = []
-      if (platform) msgs = msgs.filter((m:any) => m.platform === platform)
+      if (platform) msgs = msgs.filter((m) => m.platform === platform)
       return json({ messages: msgs })
     }
     if (path === '/api/platform-chat/send' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      let msgs = await kvGet(kv, `platform_msgs_${user.id}`, []) as any[]
+      let msgs = await kvGet(kv, `platform_msgs_${user.id}`, [])
       if (!Array.isArray(msgs)) msgs = []
       const msg = { id: uuid(), platform: body.platform||'sms', to: body.to||'', body: body.message||'', from: 'me', sent_at: new Date().toISOString(), status: 'sent' }
       msgs.unshift(msg)
@@ -1967,27 +1966,27 @@ export async function onRequest(context) {
     // ══════════════════════════════════════════════════════════════════
     return json({ error: `Not found: ${method} ${path}` }, 404)
 
-  } catch (err: any) {
+  } catch (err) {
     return json({ error: err?.message || 'Internal server error' }, 500)
   }
 }
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
-function getAllSetCookies(response: Response): string[] {
+function getAllSetCookies(response) {
   try {
-    if (typeof (response.headers as any).getAll === 'function') {
-      return (response.headers as any).getAll('set-cookie')
+    if (typeof (response.headers).getAll === 'function') {
+      return (response.headers).getAll('set-cookie')
     }
   } catch {}
-  const cookies: string[] = []
+  const cookies = []
   for (const [key, val] of response.headers.entries()) {
     if (key.toLowerCase() === 'set-cookie') cookies.push(val)
   }
   return cookies
 }
 
-function parseCookiesArray(arr: string[]): string {
-  const map = new Map<string,string>()
+function parseCookiesArray(arr) {
+  const map = new Map()
   for (const raw of arr) {
     if (!raw) continue
     const part = raw.split(';')[0].trim()
@@ -1997,13 +1996,13 @@ function parseCookiesArray(arr: string[]): string {
   return [...map.entries()].map(([k,v])=>`${k}=${v}`).join('; ')
 }
 
-function parseCookies(h: string): string {
+function parseCookies(h) {
   if (!h) return ''
   return h.split(/,(?=[^;]+=)/).map(c=>c.split(';')[0].trim()).filter(Boolean).join('; ')
 }
 
-function mergeCookies(...parts: string[]): string {
-  const map = new Map<string,string>()
+function mergeCookies(...parts) {
+  const map = new Map()
   for (const part of parts) {
     if (!part) continue
     for (const c of part.split(';').map(s=>s.trim()).filter(Boolean)) {
@@ -2015,10 +2014,10 @@ function mergeCookies(...parts: string[]): string {
 }
 
 // ─── iVASMS Login ─────────────────────────────────────────────────────────────
-async function ivasmsLogin(email: string, password: string) {
+async function ivasmsLogin(email, password) {
   const BASE = 'https://www.ivasms.com'
   const UA   = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-  const baseHeaders: Record<string,string> = {
+  const baseHeaders = {
     'User-Agent':                UA,
     'Accept':                    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
     'Accept-Language':           'en-US,en;q=0.9',
@@ -2064,7 +2063,7 @@ async function ivasmsLogin(email: string, password: string) {
   if (xsrfMatch) { try { xsrfDecoded = decodeURIComponent(xsrfMatch[1]) } catch {} }
   if (!csrfToken && xsrfDecoded) csrfToken = xsrfDecoded
 
-  const postHeaders: Record<string,string> = {
+  const postHeaders = {
     ...baseHeaders,
     'Content-Type':   'application/x-www-form-urlencoded',
     'Cookie':          initCookies,
@@ -2106,7 +2105,7 @@ async function ivasmsLogin(email: string, password: string) {
 }
 
 // ─── iVASMS Scraper ───────────────────────────────────────────────────────────
-async function scrapeIVASMS(email: string, password: string, userId: string, kv: any) {
+async function scrapeIVASMS(email, password, userId, kv) {
   const sess   = await ivasmsLogin(email, password)
   const BASE   = sess.base
   const hdrs   = { ...sess.headers, Cookie: sess.cookies }
@@ -2120,7 +2119,7 @@ async function scrapeIVASMS(email: string, password: string, userId: string, kv:
       if (r.redirected && r.url?.includes('/login')) throw new Error('Auth failed')
       html = await r.text()
       if (/<title>[^<]*[Ll]ogin[^<]*<\/title>/.test(html)) throw new Error('Auth failed — login page')
-    } catch (e: any) { if (pageNum === 1) throw new Error(`Numbers page failed: ${e.message}`); break }
+    } catch (e) { if (pageNum === 1) throw new Error(`Numbers page failed: ${e.message}`); break }
     allHtml += html
     const maxPage = Math.max(pageNum, ...([...html.matchAll(/href="[^"]*[?&]page=(\d+)"/g)].map(m=>parseInt(m[1]))))
     hasMore = maxPage > pageNum
@@ -2131,7 +2130,7 @@ async function scrapeIVASMS(email: string, password: string, userId: string, kv:
 
   const existing    = await kvGet(kv, `numbers_${userId}`, [])
   const existingArr = Array.isArray(existing) ? existing : []
-  const phoneToOld: Record<string,any>  = {}
+  const phoneToOld  = {}
   for (const n of existingArr) { if (n.phone) phoneToOld[n.phone] = n }
   for (const n of numbers) {
     const old = phoneToOld[n.phone]
@@ -2141,13 +2140,13 @@ async function scrapeIVASMS(email: string, password: string, userId: string, kv:
   let totalSmsAdded = 0
   const existingMsgs = await kvGet(kv, `sms_${userId}`, [])
   const msgArr       = Array.isArray(existingMsgs) ? [...existingMsgs] : []
-  const existingKeys = new Set(msgArr.map((m:any) => `${m.phone_number}|${m.sender}|${(m.body||'').slice(0,50)}`))
+  const existingKeys = new Set(msgArr.map((m) => `${m.phone_number}|${m.sender}|${(m.body||'').slice(0,50)}`))
 
   const BATCH = 5
   const numbersWithId = numbers.filter(n => n.ivasms_id)
   for (let i = 0; i < numbersWithId.length; i += BATCH) {
     const batch = numbersWithId.slice(i, i+BATCH)
-    await Promise.all(batch.map(async (num: any) => {
+    await Promise.all(batch.map(async (num) => {
       try {
         const smsUrls = [`${BASE}/portal/numbers/${num.ivasms_id}/sms`, `${BASE}/portal/numbers/${num.ivasms_id}/messages`]
         let smsHtml = ''
@@ -2169,15 +2168,15 @@ async function scrapeIVASMS(email: string, password: string, userId: string, kv:
 
   let waAdded = 0
   try {
-    let contacts = await kvGet(kv, `wa_contacts_${userId}`, []) as any[]
+    let contacts = await kvGet(kv, `wa_contacts_${userId}`, [])
     if (!Array.isArray(contacts)) contacts = []
-    const existingPhones = new Set(contacts.map((c:any) => c.phone))
+    const existingPhones = new Set(contacts.map((c) => c.phone))
     for (const num of numbers) {
       const n = num.phone?.replace(/[\s\-().]/g,'')
       if (!n || existingPhones.has(n)) continue
       try {
         const flag = num.country
-          ? String.fromCodePoint(...num.country.toUpperCase().split('').map((c:string)=>c.charCodeAt(0)+127397))
+          ? String.fromCodePoint(...num.country.toUpperCase().split('').map((c)=>c.charCodeAt(0)+127397))
           : '📱'
         contacts.unshift({ id: uuid(), name: `${flag} ${num.country_name||num.country||'iVASMS'} ···${n.slice(-4)}`, phone: n, avatar: null, source: 'ivasms', ivasms_id: num.ivasms_id||null, country: num.country||null, country_name: num.country_name||null, addedAt: new Date().toISOString(), lastMessage: null, lastMessageAt: null, unread: 0 })
         existingPhones.add(n); waAdded++
@@ -2189,9 +2188,9 @@ async function scrapeIVASMS(email: string, password: string, userId: string, kv:
   return { success: true, count: numbers.length, added: numbers.length, smsAdded: totalSmsAdded, waAdded, pages: pageNum-1 }
 }
 
-function parseNumbers(html: string, userId: string) {
-  const numbers: any[] = []
-  const countryMap: Record<string,string> = {
+function parseNumbers(html, userId) {
+  const numbers = []
+  const countryMap = {
     US:'United States',GB:'United Kingdom',UK:'United Kingdom',DE:'Germany',FR:'France',RU:'Russia',
     IN:'India',CN:'China',BR:'Brazil',CA:'Canada',AU:'Australia',JP:'Japan',KR:'South Korea',
     SE:'Sweden',NL:'Netherlands',PL:'Poland',UA:'Ukraine',IT:'Italy',ES:'Spain',MX:'Mexico',
@@ -2220,8 +2219,8 @@ function parseNumbers(html: string, userId: string) {
   return numbers
 }
 
-function parseMessages(html: string, num: any, userId: string) {
-  const messages: any[] = []
+function parseMessages(html, num, userId) {
+  const messages = []
   const SERVICE_PATTERNS = [
     [/google|gmail|youtube/i,'Google'],[/whatsapp/i,'WhatsApp'],[/telegram/i,'Telegram'],
     [/facebook|fb\b|instagram/i,'Facebook'],[/twitter|x\.com/i,'Twitter'],[/amazon|aws/i,'Amazon'],
@@ -2239,13 +2238,13 @@ function parseMessages(html: string, num: any, userId: string) {
     if (row.includes('<th')) continue
     const cells = [...row.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(m=>m[0])
     if (cells.length < 2) continue
-    const getText = (c: string) => c.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&nbsp;/g,' ').trim()
+    const getText = (c) => c.replace(/<[^>]+>/g,'').replace(/&amp;/g,'&').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&nbsp;/g,' ').trim()
     const sender  = getText(cells[0]||'')
     const body    = getText(cells[1]||'')
     const timeRaw = getText(cells[2]||'')
     if (!body || body.length < 3) continue
     let service = 'Unknown'
-    for (const [p,s] of SERVICE_PATTERNS) { if ((p as RegExp).test(body)||(p as RegExp).test(sender)){service=s as string;break} }
+    for (const [p,s] of SERVICE_PATTERNS) { if ((p).test(body)||(p).test(sender)){service=s;break} }
     const otpMatches = [...body.matchAll(OTP_REGEX)].map(m=>m[1])
     const otp = otpMatches.find(o=>o.length>=4&&o.length<=8)||null
     messages.push({ id: uuid(), user_id: userId, number_id: num.id, phone_number: num.phone, sender: sender||'Unknown', body, otp, service, received_at: parseTime(timeRaw)||new Date().toISOString(), starred: false, tags: [] })
@@ -2253,13 +2252,13 @@ function parseMessages(html: string, num: any, userId: string) {
   return messages
 }
 
-function parseTime(str: string) {
+function parseTime(str) {
   if (!str) return null
   try { const d = new Date(str); if (!isNaN(d.getTime())) return d.toISOString() } catch {}
   return null
 }
 
-function detectCountry(phone: string) {
+function detectCountry(phone) {
   const p = phone.replace(/^0+/,'')
   if (p.startsWith('+1')||p.startsWith('1'))    return 'US'
   if (p.startsWith('+44')||p.startsWith('44'))  return 'GB'
