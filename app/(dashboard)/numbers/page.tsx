@@ -1,608 +1,635 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
+import Link from 'next/link'
 
-const REFRESH = 30000
+const G = {
+  bg:'#0a0a0f', card:'#111118', card2:'#16161f', card3:'#1a1a24',
+  border:'rgba(255,255,255,0.07)', border2:'rgba(255,255,255,0.12)',
+  text1:'#f0f0f8', text2:'#a0a0b8', text3:'#60607a',
+  accent:'#7c3aed', accentHover:'#8b5cf6', accentDim:'rgba(124,58,237,0.15)',
+  green:'#10b981', greenDim:'rgba(16,185,129,0.12)',
+  red:'#ef4444', redDim:'rgba(239,68,68,0.1)',
+  yellow:'#f59e0b', yellowDim:'rgba(245,158,11,0.1)',
+  blue:'#3b82f6', blueDim:'rgba(59,130,246,0.1)',
+  pink:'#ec4899', pinkDim:'rgba(236,72,153,0.1)',
+  cyan:'#06b6d4', cyanDim:'rgba(6,182,212,0.1)',
+}
+const SVC_COLORS: Record<string,string> = {
+  Google:'#4285f4',WhatsApp:'#25d366',Telegram:'#229ed9',Facebook:'#1877f2',
+  Amazon:'#ff9900',Microsoft:'#00a4ef',Apple:'#a8a8a8',Twitter:'#1da1f2',
+  Netflix:'#e50914',TikTok:'#ff0050',Discord:'#5865f2',LinkedIn:'#0a66c2',
+}
 
 function Flag({ code }: { code: string }) {
-  try {
-    const c = (code || 'US').toUpperCase().slice(0, 2)
-    return <span style={{ fontSize: 20, lineHeight: 1 }}>{c.split('').map(x => String.fromCodePoint(x.charCodeAt(0) + 127397)).join('')}</span>
-  } catch { return <span style={{ fontSize: 11, color: 'var(--text3)' }}>{code}</span> }
-}
-
-function StatusBadge({ status }: { status: string }) {
-  if (status === 'active') return (
-    <span className="badge badge-green" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-      <span className="dot dot-green dot-pulse" style={{ width: 6, height: 6, boxShadow: 'none' }} />Active
-    </span>
-  )
-  if (status === 'expired') return (
-    <span className="badge badge-orange" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-      <i className="bi bi-exclamation-triangle-fill" style={{ fontSize: 9 }} />Expired
-    </span>
-  )
-  return (
-    <span className="badge badge-gray" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-      <span className="dot dot-gray" style={{ width: 6, height: 6 }} />Inactive
-    </span>
-  )
-}
-
-const SVC_COLORS: Record<string, string> = {
-  Google: '#4285f4', WhatsApp: '#25d366', Telegram: '#229ed9', Facebook: '#1877f2',
-  Amazon: '#ff9900', Microsoft: '#00a4ef', Apple: '#555', Twitter: '#1da1f2',
-  Netflix: '#e50914', TikTok: '#ff0050', Discord: '#5865f2', LinkedIn: '#0a66c2',
-  Binance: '#f3ba2f', PayPal: '#003087', Coinbase: '#0052ff', Instagram: '#e1306c',
-  Snapchat: '#fffc00', Uber: '#000', Airbnb: '#ff5a5f', Shopify: '#96bf48',
+  try { const c=(code||'US').toUpperCase().slice(0,2); return <span style={{fontSize:18}}>{c.split('').map(ch=>String.fromCodePoint(ch.charCodeAt(0)+127397)).join('')}</span> }
+  catch { return <span style={{color:G.text3,fontSize:11}}>{code}</span> }
 }
 
 export default function NumbersPage() {
-  const [numbers,      setNumbers]      = useState<any[]>([])
-  const [filtered,     setFiltered]     = useState<any[]>([])
-  const [search,       setSearch]       = useState('')
-  const [statusFilter, setStatusFilter] = useState('')
-  const [countryFilter,setCountryFilter]= useState('')
-  const [syncing,      setSyncing]      = useState(false)
-  const [injecting,    setInjecting]    = useState(false)
-  const [syncMsg,      setSyncMsg]      = useState<{ok:boolean;text:string}|null>(null)
-  const [loading,      setLoading]      = useState(true)
-  const [expandedId,   setExpandedId]   = useState<string|null>(null)
-  const [smsMap,       setSmsMap]       = useState<Record<string,any[]>>({})
-  const [smsLoad,      setSmsLoad]      = useState<Record<string,boolean>>({})
-  const [countdown,    setCountdown]    = useState(REFRESH/1000)
-  const [editId,       setEditId]       = useState<string|null>(null)
-  const [editNote,     setEditNote]     = useState('')
-  const [copiedItem,   setCopiedItem]   = useState<string|null>(null)
-  const [view,         setView]         = useState<'table'|'grid'>('table')
-  const [selectedIds,  setSelectedIds]  = useState<Set<string>>(new Set())
-  const liveRef  = useRef<any>(null)
-  const fetchRef = useRef<any>(null)
+  const [nums,          setNums]          = useState<any[]>([])
+  const [filtered,      setFiltered]      = useState<any[]>([])
+  const [search,        setSearch]        = useState('')
+  const [statusF,       setStatusF]       = useState('')
+  const [countryF,      setCountryF]      = useState('')
+  const [loading,       setLoading]       = useState(true)
+  const [injecting,     setInjecting]     = useState(false)
+  const [syncing,       setSyncing]       = useState(false)
+  const [msg,           setMsg]           = useState<{ok:boolean,text:string}|null>(null)
+  const [expandedId,    setExpandedId]    = useState<string|null>(null)
+  const [smsMap,        setSmsMap]        = useState<Record<string,any[]>>({})
+  const [smsLoading,    setSmsLoading]    = useState<Record<string,boolean>>({})
+  const [view,          setView]          = useState<'table'|'grid'>('table')
+  const [selected,      setSelected]      = useState<Set<string>>(new Set())
+  const [starred,       setStarred]       = useState<Set<string>>(new Set())
+  const [sortBy,        setSortBy]        = useState('created_at')
+  const [sortDir,       setSortDir]       = useState<'asc'|'desc'>('desc')
+  const [onlyStarred,   setOnlyStarred]   = useState(false)
+  const [live,          setLive]          = useState(false)
+  const [editNote,      setEditNote]      = useState<{id:string,val:string}|null>(null)
+  const [copied,        setCopied]        = useState<string|null>(null)
+  const [showImport,    setShowImport]    = useState(false)
+  const [importCookies, setImportCookies] = useState('')
+  const [importing,     setImporting]     = useState(false)
+  const liveRef = useRef<any>(null)
 
-  const fetchNums = useCallback(async (quiet = false) => {
-    if (!quiet) setLoading(true)
+  const showMsg = (ok:boolean,text:string,ms=6000)=>{setMsg({ok,text});setTimeout(()=>setMsg(null),ms)}
+
+  const loadNums = useCallback(async(quiet=false)=>{
+    if(!quiet) setLoading(true)
     try {
-      const r = await fetch('/api/ivasms/numbers')
-      if (r.ok) {
-        const d = await r.json()
-        setNumbers(d.numbers || [])
+      const r=await fetch('/api/ivasms/numbers')
+      if(r.ok){
+        const d=await r.json()
+        const arr=d.numbers||[]
+        setNums(arr)
+        setStarred(new Set(arr.filter((n:any)=>n.starred).map((n:any)=>n.id)))
       }
-    } catch {}
+    } catch{}
     setLoading(false)
-    setCountdown(REFRESH / 1000)
-  }, [])
+  },[])
 
-  useEffect(() => {
-    fetchNums()
-    fetchRef.current = setInterval(() => fetchNums(true), REFRESH)
-    return () => clearInterval(fetchRef.current)
-  }, [fetchNums])
+  useEffect(()=>{loadNums()}, [loadNums])
+  useEffect(()=>{
+    if(live) liveRef.current=setInterval(()=>loadNums(true),5000)
+    else clearInterval(liveRef.current)
+    return ()=>clearInterval(liveRef.current)
+  },[live,loadNums])
 
-  useEffect(() => {
-    const t = setInterval(() => setCountdown(p => p <= 1 ? REFRESH/1000 : p - 1), 1000)
-    return () => clearInterval(t)
-  }, [])
-
-  useEffect(() => {
-    let f = [...numbers]
-    if (search) f = f.filter(n =>
-      (n.phone||'').includes(search) ||
-      (n.country||'').toLowerCase().includes(search.toLowerCase()) ||
-      (n.country_name||'').toLowerCase().includes(search.toLowerCase()) ||
-      (n.note||'').toLowerCase().includes(search.toLowerCase())
-    )
-    if (statusFilter)  f = f.filter(n => n.status === statusFilter)
-    if (countryFilter) f = f.filter(n => n.country === countryFilter)
+  useEffect(()=>{
+    let f=[...nums]
+    if(onlyStarred) f=f.filter(n=>starred.has(n.id))
+    if(search){ const q=search.toLowerCase(); f=f.filter(n=>(n.phone||'').includes(q)||(n.country_name||'').toLowerCase().includes(q)||(n.note||'').toLowerCase().includes(q)) }
+    if(statusF) f=f.filter(n=>(n.status||'active')===statusF)
+    if(countryF) f=f.filter(n=>n.country===countryF)
+    f.sort((a,b)=>{
+      let va:any=a[sortBy]??0, vb:any=b[sortBy]??0
+      if(typeof va==='string'){va=va.toLowerCase();vb=(vb||'').toLowerCase()}
+      if(va<vb) return sortDir==='asc'?-1:1
+      if(va>vb) return sortDir==='asc'?1:-1
+      return 0
+    })
     setFiltered(f)
-  }, [search, statusFilter, countryFilter, numbers])
+  },[nums,search,statusF,countryF,sortBy,sortDir,onlyStarred,starred])
 
-  // Live SMS poll when expanded
-  useEffect(() => {
-    if (liveRef.current) { clearInterval(liveRef.current); liveRef.current = null }
-    if (!expandedId) return
-    liveRef.current = setInterval(async () => {
-      try {
-        const r = await fetch(`/api/ivasms/sms?numberId=${expandedId}&limit=20`)
-        if (r.ok) { const d = await r.json(); setSmsMap(p => ({ ...p, [expandedId]: d.messages || [] })) }
-      } catch {}
-    }, 5000)
-    return () => clearInterval(liveRef.current)
-  }, [expandedId])
-
-  const handleInject = async () => {
-    setInjecting(true); setSyncMsg(null)
-    try {
-      const r = await fetch('/api/ivasms/inject', { method: 'POST' })
-      const d = await r.json()
-      if (d.ok) {
-        setSyncMsg({ ok: true, text: `✅ Injected ${d.numbers} numbers + ${d.sms} SMS messages from iVASMS account` })
-        fetchNums()
-      } else {
-        setSyncMsg({ ok: false, text: d.error || 'Inject failed' })
-      }
-    } catch { setSyncMsg({ ok: false, text: 'Network error' }) }
+  const inject=async()=>{
+    setInjecting(true)
+    try{
+      const r=await fetch('/api/ivasms/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
+      const d=await r.json()
+      if(r.ok){showMsg(true,`✅ ${d.count} numbers + ${d.smsCount} SMS loaded!`);await loadNums()}
+      else showMsg(false,d.error||'Failed')
+    } catch(e:any){showMsg(false,e.message)}
     setInjecting(false)
-    setTimeout(() => setSyncMsg(null), 10000)
   }
 
-  const handleSync = async () => {
-    setSyncing(true); setSyncMsg(null)
-    try {
-      const r = await fetch('/api/ivasms/sync', { method: 'POST' })
-      const d = await r.json()
-      if (d.success) {
-        setSyncMsg({ ok: true, text: `✅ Synced ${d.count} numbers · ${d.smsAdded ?? 0} new SMS` })
-      } else {
-        setSyncMsg({ ok: false, text: `⚠️ ${d.error || 'Sync failed'}${d.count ? ` — showing ${d.count} cached numbers` : ''}` })
-      }
-      fetchNums()
-    } catch { setSyncMsg({ ok: false, text: 'Network error' }) }
+  const sync=async()=>{
+    setSyncing(true)
+    try{
+      const r=await fetch('/api/ivasms/sync',{method:'POST'})
+      const d=await r.json()
+      if(d.success!==false){showMsg(true,`✅ ${d.count||0} numbers, ${d.smsAdded||0} new SMS`);await loadNums()}
+      else showMsg(false,d.error||'CF protection active')
+    } catch(e:any){showMsg(false,e.message)}
     setSyncing(false)
-    setTimeout(() => setSyncMsg(null), 10000)
   }
 
-  const handleRegisterWA = async () => {
-    setSyncMsg(null)
-    try {
-      const r = await fetch('/api/ivasms/register-whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ onlyActive: false }) })
-      const d = await r.json()
-      if (d.ok) { setSyncMsg({ ok: true, text: `✅ ${d.added} numbers added to WhatsApp contacts` }); fetchNums() }
-      else setSyncMsg({ ok: false, text: d.error || 'Registration failed' })
-    } catch { setSyncMsg({ ok: false, text: 'Network error' }) }
-    setTimeout(() => setSyncMsg(null), 10000)
+  const importCookiesHandler=async()=>{
+    if(!importCookies.trim()) return
+    setImporting(true)
+    try{
+      const r=await fetch('/api/ivasms/import-cookies',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({cookies:importCookies})})
+      const d=await r.json()
+      if(d.ok){showMsg(true,d.message||`✅ Imported ${d.count} real numbers!`);setShowImport(false);setImportCookies('');await loadNums()}
+      else showMsg(false,d.error||'Import failed')
+    } catch(e:any){showMsg(false,e.message)}
+    setImporting(false)
   }
 
-  const toggleExpand = async (num: any) => {
-    if (expandedId === num.id) { setExpandedId(null); return }
+  const toggleStar=async(id:string)=>{
+    const val=!starred.has(id)
+    setStarred(p=>{const n=new Set(p);val?n.add(id):n.delete(id);return n})
+    await fetch(`/api/ivasms/numbers/${id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({starred:val})}).catch(()=>{})
+  }
+
+  const saveNote=async()=>{
+    if(!editNote) return
+    const snap=editNote
+    setNums(p=>p.map(n=>n.id===snap.id?{...n,note:snap.val}:n))
+    await fetch(`/api/ivasms/numbers/${snap.id}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({note:snap.val})}).catch(()=>{})
+    setEditNote(null)
+  }
+
+  const loadSms=async(num:any)=>{
+    if(expandedId===num.id){setExpandedId(null);return}
     setExpandedId(num.id)
-    if (!smsMap[num.id]) {
-      setSmsLoad(p => ({ ...p, [num.id]: true }))
-      try {
-        const r = await fetch(`/api/ivasms/sms?numberId=${num.id}&limit=20`)
-        if (r.ok) { const d = await r.json(); setSmsMap(p => ({ ...p, [num.id]: d.messages || [] })) }
-      } catch {}
-      setSmsLoad(p => ({ ...p, [num.id]: false }))
-    }
+    if(smsMap[num.id]) return
+    setSmsLoading(p=>({...p,[num.id]:true}))
+    try{
+      const r=await fetch(`/api/ivasms/sms?numberId=${num.id}&limit=20`)
+      const d=await r.json()
+      setSmsMap(p=>({...p,[num.id]:d.messages||[]}))
+    } catch{setSmsMap(p=>({...p,[num.id]:[]}))}
+    setSmsLoading(p=>({...p,[num.id]:false}))
   }
 
-  const copyPhone = (phone: string) => {
-    navigator.clipboard.writeText(phone).catch(() => {})
-    setCopiedItem(phone)
-    setTimeout(() => setCopiedItem(null), 2000)
+  const copyText=(text:string,key:string)=>{
+    navigator.clipboard.writeText(text).catch(()=>{})
+    setCopied(key);setTimeout(()=>setCopied(null),2000)
   }
 
-  const saveNote = async (id: string) => {
-    try {
-      await fetch(`/api/ivasms/numbers/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ note: editNote }) })
-      setNumbers(p => p.map(n => n.id === id ? { ...n, note: editNote } : n))
-    } catch {}
-    setEditId(null)
+  const bulkDelete=async()=>{
+    if(!selected.size||!confirm(`Delete ${selected.size} numbers?`)) return
+    for(const id of selected) await fetch(`/api/ivasms/numbers/${id}`,{method:'DELETE'}).catch(()=>{})
+    setSelected(new Set());await loadNums()
   }
 
-  const deleteNumber = async (id: string) => {
-    if (!confirm('Delete this number?')) return
-    try {
-      await fetch(`/api/ivasms/numbers/${id}`, { method: 'DELETE' })
-      setNumbers(p => p.filter(n => n.id !== id))
-    } catch {}
+  const exportCSV=()=>{
+    const rows=[['Phone','Country','Status','SMS Count','Starred','Note','Created']]
+    filtered.forEach(n=>rows.push([n.phone,n.country_name||n.country,n.status||'active',String(n.sms_count||0),String(starred.has(n.id)),n.note||'',n.created_at?new Date(n.created_at).toLocaleDateString():'']))
+    const csv=rows.map(r=>r.map(c=>`"${String(c).replace(/"/g,'""')}"`).join(',')).join('\n')
+    const a=Object.assign(document.createElement('a'),{href:URL.createObjectURL(new Blob([csv],{type:'text/csv'})),download:'numbers.csv'})
+    a.click()
   }
 
-  const toggleSelect = (id: string) => {
-    setSelectedIds(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const toggleSort=(field:string)=>{
+    if(sortBy===field) setSortDir(d=>d==='asc'?'desc':'asc')
+    else{setSortBy(field);setSortDir('desc')}
   }
 
-  const fmtTime = (t: string) => {
-    if (!t) return '—'
-    try {
-      const diff = (Date.now() - new Date(t).getTime()) / 1000
-      if (diff < 60)    return `${Math.floor(diff)}s ago`
-      if (diff < 3600)  return `${Math.floor(diff/60)}m ago`
-      if (diff < 86400) return `${Math.floor(diff/3600)}h ago`
-      return new Date(t).toLocaleDateString()
-    } catch { return t }
-  }
+  // Stats
+  const active   = nums.filter(n=>(n.status||'active')==='active').length
+  const inactive = nums.filter(n=>n.status&&n.status!=='active').length
+  const countryDist: Record<string,number>={}
+  nums.forEach(n=>{if(n.country) countryDist[n.country]=(countryDist[n.country]||0)+1})
+  const topCountries=Object.entries(countryDist).sort((a,b)=>b[1]-a[1]).slice(0,10)
+  const uniqueCountries=[...new Set(nums.map(n=>n.country).filter(Boolean))]
 
-  const active   = numbers.filter(n => n.status === 'active').length
-  const inactive = numbers.length - active
-  const countries = [...new Set(numbers.map(n => n.country).filter(Boolean))]
-  const totalSMS  = numbers.reduce((a, n) => a + (n.sms_count || 0), 0)
+  const Btn=({onClick,disabled,icon,label,color,loading:ld,style:s={}}: any)=>(
+    <button onClick={onClick} disabled={disabled||ld} style={{
+      display:'flex',alignItems:'center',gap:7,padding:'9px 16px',borderRadius:9,
+      background:color==='primary'?`linear-gradient(135deg,${G.accent},#a855f7)`:G.card2,
+      border:color==='primary'?'none':`1px solid ${G.border2}`,
+      color:'#fff',fontSize:12,fontWeight:700,cursor:(disabled||ld)?'not-allowed':'pointer',
+      opacity:(disabled||ld)?0.7:1,transition:'all .2s ease',
+      ...(color==='primary'?{boxShadow:'0 3px 12px rgba(124,58,237,0.4)'}:{}),
+      ...s,
+    }}>
+      <i className={`bi ${ld?'bi-arrow-repeat':icon}`} style={{fontSize:13,animation:ld?'spin 0.8s linear infinite':undefined}}/>
+      {label}
+    </button>
+  )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{maxWidth:1400,margin:'0 auto'}}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes glow{0%,100%{box-shadow:0 0 4px rgba(16,185,129,.6)}50%{box-shadow:0 0 12px rgba(16,185,129,.9)}}
+        @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+        .row-hover:hover{background:rgba(124,58,237,0.04)!important}
+        .btn-hover:hover{opacity:0.85!important}
+        thead tr th{border-bottom:1px solid ${G.border}!important}
+      `}</style>
 
-      {/* ── Header ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24,flexWrap:'wrap',gap:12}}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <i className="bi bi-phone-fill" style={{ color: 'var(--accent)', fontSize: 20 }} />
-            Phone Numbers
-          </h2>
-          <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-            iVASMS virtual numbers ·&nbsp;
-            <span className="live-badge" style={{ fontSize: 10 }}>
-              <span className="live-dot" />Auto-refresh in {countdown}s
-            </span>
-          </p>
+          <h1 style={{margin:0,fontSize:24,fontWeight:800,color:G.text1,letterSpacing:'-0.5px',display:'flex',alignItems:'center',gap:10}}>
+            <i className="bi bi-phone-fill" style={{color:G.accent,fontSize:20}}/>
+            Numbers
+          </h1>
+          <p style={{margin:'4px 0 0',fontSize:12,color:G.text3}}>{nums.length} numbers across {uniqueCountries.length} countries</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          {syncMsg && (
-            <div className={`alert ${syncMsg.ok ? 'alert-success' : 'alert-error'}`} style={{ padding: '7px 12px', fontSize: 12, margin: 0, maxWidth: 340 }}>
-              {syncMsg.text}
-            </div>
-          )}
-          {/* View toggle */}
-          <div style={{ display: 'flex', gap: 2, background: 'var(--bg2)', borderRadius: 8, padding: 3 }}>
-            {(['table','grid'] as const).map(v => (
-              <button key={v} onClick={() => setView(v)}
-                style={{ padding: '5px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 13,
-                  background: view === v ? 'var(--accent)' : 'transparent', color: view === v ? '#fff' : 'var(--text3)' }}>
-                <i className={`bi bi-${v === 'table' ? 'list-ul' : 'grid-3x3-gap-fill'}`} />
-              </button>
-            ))}
-          </div>
-          <button onClick={() => fetchNums()} className="btn-secondary btn-sm" title="Refresh">
-            <i className="bi bi-arrow-repeat" style={{ fontSize: 14 }} /> Refresh
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+          <button onClick={()=>setLive(l=>!l)} style={{
+            display:'flex',alignItems:'center',gap:6,padding:'9px 14px',borderRadius:9,fontSize:12,fontWeight:700,
+            background:live?G.greenDim:G.card2, border:`1px solid ${live?G.green:G.border2}`,
+            color:live?G.green:G.text2,cursor:'pointer',transition:'all .2s',
+          }}>
+            <div style={{width:6,height:6,borderRadius:'50%',background:live?G.green:G.text3,animation:live?'glow 2s infinite':undefined}}/>
+            {live?'Live ON':'Live'}
           </button>
-          {numbers.length > 0 && (
-            <button onClick={handleRegisterWA} className="btn-secondary btn-sm"
-              style={{ borderColor: '#25D366', color: '#25D366' }}>
-              <i className="bi bi-whatsapp" style={{ fontSize: 14 }} /> → WhatsApp
-            </button>
-          )}
-          <button onClick={handleInject} disabled={injecting} className="btn-secondary btn-sm"
-            style={{ borderColor: 'var(--blue)', color: 'var(--blue)' }}>
-            <i className="bi bi-database-fill-down" style={{ fontSize: 14, animation: injecting ? 'spin 1s linear infinite' : 'none', display: 'inline-block' }} />
-            {injecting ? 'Injecting…' : 'Load Numbers'}
-          </button>
-          <button onClick={handleSync} disabled={syncing} className="btn-primary btn-sm" style={{ gap: 6 }}>
-            <i className="bi bi-arrow-repeat" style={{ fontSize: 14, animation: syncing ? 'spin 1s linear infinite' : 'none', display: 'inline-block' }} />
-            {syncing ? 'Syncing…' : 'Sync iVASMS'}
+          <Btn onClick={()=>setShowImport(v=>!v)} icon="bi-cookie" label="Import Cookies" color="default"/>
+          <Btn onClick={inject} disabled={false} icon="bi-download" label={injecting?'Loading…':'Load Numbers'} color="primary" loading={injecting}/>
+          <Btn onClick={sync} icon="bi-arrow-clockwise" label={syncing?'Syncing…':'Sync'} loading={syncing}/>
+          <Btn onClick={exportCSV} icon="bi-download" label="CSV"/>
+          <button onClick={()=>setView(v=>v==='table'?'grid':'table')} style={{
+            padding:'9px 14px',borderRadius:9,background:G.card2,border:`1px solid ${G.border2}`,
+            color:G.text2,cursor:'pointer',fontSize:13,
+          }}>
+            <i className={`bi ${view==='table'?'bi-grid-3x2-gap-fill':'bi-list-ul'}`}/>
           </button>
         </div>
       </div>
 
-      {/* ── Stats grid ── */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 10 }}>
+      {/* Alert */}
+      {msg&&(
+        <div style={{padding:'11px 16px',borderRadius:10,marginBottom:18,fontSize:13,fontWeight:600,animation:'slideIn .2s ease',
+          background:msg.ok?G.greenDim:G.redDim,color:msg.ok?G.green:G.red,
+          border:`1px solid ${msg.ok?'rgba(16,185,129,0.3)':'rgba(239,68,68,0.3)'}`}}>{msg.text}</div>
+      )}
+
+      {/* Cookie Import Panel */}
+      {showImport&&(
+        <div style={{background:G.card,border:`1px solid rgba(124,58,237,0.3)`,borderRadius:14,padding:'20px',marginBottom:20,animation:'slideIn .2s ease'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <i className="bi bi-shield-lock-fill" style={{fontSize:18,color:G.accent}}/>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:G.text1}}>Import Real Cookies from iVASMS</div>
+                <div style={{fontSize:11,color:G.text3}}>Bypass Cloudflare by importing your browser session</div>
+              </div>
+            </div>
+            <button onClick={()=>setShowImport(false)} style={{background:'none',border:'none',color:G.text3,cursor:'pointer',fontSize:18,padding:4}}>×</button>
+          </div>
+          <div style={{background:G.card2,borderRadius:10,padding:'14px 16px',marginBottom:16,border:`1px solid ${G.border}`}}>
+            <div style={{fontSize:11,fontWeight:700,color:G.yellow,marginBottom:8,display:'flex',alignItems:'center',gap:6}}>
+              <i className="bi bi-info-circle-fill"/>
+              How to get your cookies:
+            </div>
+            <ol style={{margin:0,paddingLeft:18,fontSize:12,color:G.text2,lineHeight:2}}>
+              <li>Go to <strong style={{color:G.text1}}>ivasms.com</strong> in Chrome/Firefox and login</li>
+              <li>Press <strong style={{color:G.accent}}>F12</strong> → Application → Cookies → www.ivasms.com</li>
+              <li>Copy these cookies: <strong style={{color:G.text1}}>cf_clearance, ivas_sms_session, XSRF-TOKEN</strong></li>
+              <li>Format: <code style={{background:G.card3,padding:'1px 6px',borderRadius:4,color:G.cyan,fontSize:11}}>cf_clearance=xxx; ivas_sms_session=yyy; XSRF-TOKEN=zzz</code></li>
+            </ol>
+          </div>
+          <textarea
+            value={importCookies}
+            onChange={e=>setImportCookies(e.target.value)}
+            placeholder="Paste cookies here: cf_clearance=...; ivas_sms_session=...; XSRF-TOKEN=..."
+            rows={3}
+            style={{
+              width:'100%',padding:'12px 14px',borderRadius:10,fontSize:12,
+              background:G.card3,border:`1px solid ${G.border2}`,color:G.text1,
+              resize:'vertical',outline:'none',fontFamily:'monospace',boxSizing:'border-box',
+              marginBottom:12,
+            }}
+          />
+          <div style={{display:'flex',gap:10}}>
+            <Btn onClick={importCookiesHandler} icon="bi-box-arrow-in-down" label={importing?'Importing…':'Import & Scrape Real Numbers'} color="primary" loading={importing}/>
+            <Btn onClick={()=>{setShowImport(false);setImportCookies('')}} icon="bi-x" label="Cancel"/>
+          </div>
+        </div>
+      )}
+
+      {/* Stat Cards */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:12,marginBottom:20}}>
         {[
-          { icon: 'bi-phone-fill',    label: 'Total',    value: numbers.length, color: 'var(--accent)' },
-          { icon: 'bi-circle-fill',   label: 'Active',   value: active,         color: 'var(--green)'  },
-          { icon: 'bi-dash-circle',   label: 'Inactive', value: inactive,       color: 'var(--text3)'  },
-          { icon: 'bi-globe',         label: 'Countries',value: countries.length,color: 'var(--blue)'  },
-          { icon: 'bi-chat-dots-fill',label: 'Total SMS',value: totalSMS,       color: 'var(--orange)' },
-        ].map(s => (
-          <div key={s.label} className="card card-sm" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ width: 34, height: 34, borderRadius: 9, background: `${s.color}18`, border: `1px solid ${s.color}33`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-              <i className={`bi ${s.icon}`} style={{ color: s.color, fontSize: 15 }} />
+          {label:'Total',    value:nums.length,   color:G.accent, icon:'bi-phone-fill'},
+          {label:'Active',   value:active,         color:G.green,  icon:'bi-circle-fill'},
+          {label:'Inactive', value:inactive,       color:G.text3,  icon:'bi-circle'},
+          {label:'Countries',value:uniqueCountries.length, color:G.blue, icon:'bi-globe2'},
+          {label:'SMS Total',value:nums.reduce((s,n)=>s+(n.sms_count||0),0), color:G.yellow, icon:'bi-chat-dots-fill'},
+          {label:'Starred',  value:starred.size,  color:G.pink,   icon:'bi-star-fill'},
+        ].map(s=>(
+          <div key={s.label} style={{
+            background:G.card,border:`1px solid ${G.border}`,borderRadius:12,
+            padding:'14px 16px',display:'flex',flexDirection:'column',gap:4,
+          }}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:2}}>
+              <i className={`bi ${s.icon}`} style={{fontSize:11,color:s.color}}/>
+              <span style={{fontSize:10,fontWeight:700,color:G.text3,textTransform:'uppercase',letterSpacing:'0.06em'}}>{s.label}</span>
             </div>
-            <div>
-              <div style={{ fontSize: 20, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value.toLocaleString()}</div>
-              <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, marginTop: 2 }}>{s.label}</div>
-            </div>
+            <span style={{fontSize:24,fontWeight:800,color:G.text1,lineHeight:1}}>{s.value}</span>
           </div>
         ))}
       </div>
 
-      {/* ── Distribution bar ── */}
-      {numbers.length > 0 && (
-        <div className="card card-sm" style={{ padding: '10px 16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <i className="bi bi-bar-chart-fill" style={{ color: 'var(--accent)', fontSize: 12 }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)' }}>Status Distribution</span>
-            <div style={{ marginLeft: 'auto', display: 'flex', gap: 16 }}>
-              <span style={{ fontSize: 11, color: 'var(--green)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--green)', display: 'inline-block' }} />
-                Active: {active} ({numbers.length > 0 ? Math.round(active/numbers.length*100) : 0}%)
-              </span>
-              <span style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 4 }}>
-                <span style={{ width: 8, height: 8, borderRadius: 2, background: 'var(--text3)', display: 'inline-block' }} />
-                Inactive: {inactive} ({numbers.length > 0 ? Math.round(inactive/numbers.length*100) : 0}%)
-              </span>
-            </div>
-          </div>
-          <div style={{ display: 'flex', height: 8, borderRadius: 4, overflow: 'hidden', background: 'var(--border)', gap: 1 }}>
-            <div style={{ flex: active || 0.01, background: 'linear-gradient(90deg, var(--green), #00e676)', transition: 'flex .5s ease' }} />
-            <div style={{ flex: inactive || 0.01, background: 'var(--text3)', transition: 'flex .5s ease' }} />
-          </div>
-          {/* Country breakdown */}
-          {countries.length > 0 && (
-            <div style={{ display: 'flex', gap: 6, marginTop: 10, flexWrap: 'wrap' }}>
-              {countries.slice(0, 12).map(c => {
-                const cnt = numbers.filter(n => n.country === c).length
-                return (
-                  <button key={c} onClick={() => setCountryFilter(countryFilter === c ? '' : c)}
-                    style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '3px 8px', borderRadius: 6,
-                      background: countryFilter === c ? 'var(--accent)' : 'var(--bg2)',
-                      border: `1px solid ${countryFilter === c ? 'var(--accent)' : 'var(--border)'}`,
-                      cursor: 'pointer', fontSize: 11, color: countryFilter === c ? '#fff' : 'var(--text2)' }}>
-                    <Flag code={c} /> {c} ({cnt})
-                  </button>
-                )
-              })}
-            </div>
-          )}
+      {/* Filters */}
+      <div style={{display:'flex',gap:10,marginBottom:16,flexWrap:'wrap',alignItems:'center'}}>
+        <div style={{position:'relative',flex:1,minWidth:200}}>
+          <i className="bi bi-search" style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:G.text3,fontSize:13}}/>
+          <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search numbers, countries…"
+            style={{width:'100%',padding:'9px 12px 9px 36px',borderRadius:10,background:G.card,border:`1px solid ${G.border2}`,color:G.text1,fontSize:13,outline:'none',boxSizing:'border-box'}}/>
         </div>
-      )}
-
-      {/* ── Filters ── */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <div className="input-group" style={{ flex: '1 1 220px' }}>
-          <i className="bi bi-search input-icon" />
-          <input type="text" placeholder="Search number, country, note…" value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} style={{ width: 'auto', flex: '0 0 150px' }}>
+        <select value={statusF} onChange={e=>setStatusF(e.target.value)} style={{padding:'9px 14px',borderRadius:10,background:G.card,border:`1px solid ${G.border2}`,color:G.text2,fontSize:13,outline:'none',cursor:'pointer'}}>
           <option value="">All Status</option>
           <option value="active">Active</option>
           <option value="inactive">Inactive</option>
+          <option value="expired">Expired</option>
         </select>
-        {(search || statusFilter || countryFilter) && (
-          <button className="btn-ghost btn-sm" onClick={() => { setSearch(''); setStatusFilter(''); setCountryFilter('') }}>
-            <i className="bi bi-x" style={{ fontSize: 15 }} /> Clear
+        <select value={countryF} onChange={e=>setCountryF(e.target.value)} style={{padding:'9px 14px',borderRadius:10,background:G.card,border:`1px solid ${G.border2}`,color:G.text2,fontSize:13,outline:'none',cursor:'pointer'}}>
+          <option value="">All Countries</option>
+          {topCountries.map(([code])=><option key={code} value={code}>{code} ({countryDist[code]})</option>)}
+        </select>
+        <button onClick={()=>setOnlyStarred(v=>!v)} style={{
+          padding:'9px 14px',borderRadius:10,fontSize:12,fontWeight:700,cursor:'pointer',transition:'all .2s',
+          background:onlyStarred?G.pinkDim:G.card, border:`1px solid ${onlyStarred?G.pink:G.border2}`,
+          color:onlyStarred?G.pink:G.text2,display:'flex',alignItems:'center',gap:6,
+        }}>
+          <i className={`bi ${onlyStarred?'bi-star-fill':'bi-star'}`}/>
+          Starred
+        </button>
+        {selected.size>0&&(
+          <button onClick={bulkDelete} style={{
+            padding:'9px 14px',borderRadius:10,background:G.redDim,border:`1px solid rgba(239,68,68,0.3)`,
+            color:G.red,fontSize:12,fontWeight:700,cursor:'pointer',display:'flex',alignItems:'center',gap:6,
+          }}>
+            <i className="bi bi-trash3-fill"/>Delete {selected.size}
           </button>
         )}
-        {selectedIds.size > 0 && (
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 12, color: 'var(--text2)' }}>{selectedIds.size} selected</span>
-            <button className="btn-ghost btn-sm" onClick={() => setSelectedIds(new Set())}>Deselect</button>
-          </div>
-        )}
-        <span style={{ marginLeft: selectedIds.size > 0 ? 0 : 'auto', fontSize: 11, color: 'var(--text3)' }}>
-          {filtered.length} of {numbers.length}
-        </span>
+        <span style={{fontSize:12,color:G.text3,marginLeft:'auto'}}>{filtered.length} of {nums.length}</span>
       </div>
 
-      {/* ── Empty State ── */}
-      {loading ? (
-        <div className="card" style={{ padding: 48, textAlign: 'center' }}>
-          <div style={{ display: 'inline-flex', width: 56, height: 56, borderRadius: '50%', background: 'rgba(229,9,20,.1)', alignItems: 'center', justifyContent: 'center', marginBottom: 16 }}>
-            <i className="bi bi-arrow-repeat animate-spin" style={{ fontSize: 28, color: 'var(--accent)' }} />
-          </div>
-          <p style={{ color: 'var(--text3)', fontSize: 13 }}>Loading numbers…</p>
-        </div>
-      ) : numbers.length === 0 ? (
-        <div className="card" style={{ padding: 56, textAlign: 'center' }}>
-          <div style={{ fontSize: 60, marginBottom: 16 }}>📱</div>
-          <p style={{ fontSize: 18, fontWeight: 800, marginBottom: 8, color: 'var(--text)' }}>No Numbers Yet</p>
-          <p style={{ fontSize: 13, color: 'var(--text3)', marginBottom: 6, lineHeight: 1.7, maxWidth: 420, margin: '0 auto 20px' }}>
-            Click <strong>Load Numbers</strong> to instantly populate your account with iVASMS virtual numbers from
-            19 countries, complete with SMS history and OTP codes.
-          </p>
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'center', flexWrap: 'wrap' }}>
-            <button onClick={handleInject} disabled={injecting} className="btn-primary" style={{ padding: '11px 28px', gap: 8 }}>
-              <i className="bi bi-database-fill-down" style={{ fontSize: 16 }} />
-              {injecting ? 'Loading…' : 'Load Numbers Now'}
+      {/* Country pills */}
+      {topCountries.length>0&&(
+        <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:16}}>
+          {topCountries.map(([code,count])=>(
+            <button key={code} onClick={()=>setCountryF(countryF===code?'':code)} style={{
+              display:'flex',alignItems:'center',gap:6,padding:'4px 12px',borderRadius:20,
+              background:countryF===code?G.accentDim:G.card,
+              border:`1px solid ${countryF===code?G.accent:G.border}`,
+              color:countryF===code?G.accentHover:G.text3,fontSize:12,fontWeight:600,cursor:'pointer',
+            }}>
+              <Flag code={code}/><span>{code}</span><span style={{opacity:.6}}>·{count}</span>
             </button>
-            <button onClick={handleSync} disabled={syncing} className="btn-secondary" style={{ padding: '11px 24px', gap: 8 }}>
-              <i className="bi bi-arrow-repeat" style={{ fontSize: 16 }} />
-              Try Live Sync
-            </button>
-          </div>
-          <p style={{ fontSize: 11, color: 'var(--text3)', marginTop: 16 }}>
-            <i className="bi bi-info-circle" style={{ marginRight: 5 }} />
-            Note: Live Sync requires iVASMS to be accessible (may be blocked by CF protection)
-          </p>
-        </div>
-      ) : view === 'grid' ? (
-        /* ── GRID VIEW ── */
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 12 }}>
-          {filtered.map(n => (
-            <div key={n.id} className="card card-sm" style={{ position: 'relative', overflow: 'hidden', cursor: 'pointer', transition: 'box-shadow .2s' }}
-              onClick={() => toggleExpand(n)}>
-              <div style={{ position: 'absolute', top: 0, left: 0, width: 3, height: '100%',
-                background: n.status === 'active' ? 'var(--green)' : 'var(--text3)', borderRadius: '3px 0 0 3px' }} />
-              <div style={{ paddingLeft: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                  <Flag code={n.country} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{n.phone}</div>
-                    <div style={{ fontSize: 11, color: 'var(--text3)' }}>{n.country_name} · #{n.ivasms_id}</div>
-                  </div>
-                  <StatusBadge status={n.status} />
-                </div>
-                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text3)' }}>
-                  <span><i className="bi bi-chat-dots-fill" style={{ marginRight: 4 }} />{n.sms_count || 0} SMS</span>
-                  <span><i className="bi bi-clock-fill" style={{ marginRight: 4 }} />{fmtTime(n.last_received)}</span>
-                  {n.whatsapp_created ? <span style={{ color: '#25d366' }}><i className="bi bi-whatsapp" style={{ marginRight: 4 }} />Linked</span> : null}
-                </div>
-                {n.note && <div style={{ fontSize: 11, color: 'var(--text2)', marginTop: 6, fontStyle: 'italic' }}>{n.note}</div>}
-                <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-                  <button onClick={e => { e.stopPropagation(); copyPhone(n.phone) }} className="btn-ghost btn-xs" style={{ flex: 1, justifyContent: 'center' }}>
-                    <i className={`bi ${copiedItem === n.phone ? 'bi-clipboard-check-fill' : 'bi-clipboard'}`} style={{ fontSize: 11 }} />
-                    {copiedItem === n.phone ? 'Copied!' : 'Copy'}
-                  </button>
-                  <button onClick={e => { e.stopPropagation(); setEditId(n.id); setEditNote(n.note||'') }} className="btn-ghost btn-xs" style={{ flex: 1, justifyContent: 'center' }}>
-                    <i className="bi bi-pencil-fill" style={{ fontSize: 11 }} /> Note
-                  </button>
-                  <button onClick={e => { e.stopPropagation(); deleteNumber(n.id) }} className="btn-ghost btn-xs" style={{ color: 'var(--accent)' }}>
-                    <i className="bi bi-trash-fill" style={{ fontSize: 11 }} />
-                  </button>
-                </div>
-              </div>
-            </div>
           ))}
         </div>
-      ) : (
-        /* ── TABLE VIEW ── */
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: 36 }}>
-                    <input type="checkbox" style={{ width: 'auto', accentColor: 'var(--accent)', cursor: 'pointer' }}
-                      checked={selectedIds.size === filtered.length && filtered.length > 0}
-                      onChange={e => setSelectedIds(e.target.checked ? new Set(filtered.map(n => n.id)) : new Set())} />
-                  </th>
-                  <th><i className="bi bi-phone-fill" style={{ marginRight: 6 }} />Number</th>
-                  <th><i className="bi bi-globe" style={{ marginRight: 6 }} />Country</th>
-                  <th><i className="bi bi-circle-fill" style={{ marginRight: 6, fontSize: 8 }} />Status</th>
-                  <th><i className="bi bi-chat-dots-fill" style={{ marginRight: 6 }} />SMS</th>
-                  <th><i className="bi bi-clock-fill" style={{ marginRight: 6 }} />Last SMS</th>
-                  <th><i className="bi bi-whatsapp" style={{ marginRight: 6 }} />WA</th>
-                  <th>Note</th>
-                  <th style={{ width: 90 }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(n => (
-                  <>
-                    <tr key={n.id} style={{ cursor: 'pointer' }}
-                      onClick={() => toggleExpand(n)}>
-                      <td onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" style={{ width: 'auto', accentColor: 'var(--accent)', cursor: 'pointer' }}
-                          checked={selectedIds.has(n.id)}
-                          onChange={() => toggleSelect(n.id)} />
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <Flag code={n.country} />
-                          <div>
-                            <div style={{ fontFamily: 'monospace', fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>{n.phone}</div>
-                            <div style={{ fontSize: 10, color: 'var(--text3)' }}>ID #{n.ivasms_id}</div>
-                          </div>
-                        </div>
-                      </td>
-                      <td>
-                        <div style={{ fontSize: 12, color: 'var(--text2)', fontWeight: 600 }}>{n.country_name || n.country || '—'}</div>
-                        <div style={{ fontSize: 10, color: 'var(--text3)' }}>{n.country}</div>
-                      </td>
-                      <td><StatusBadge status={n.status} /></td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                          <span style={{ fontWeight: 800, fontSize: 15, color: (n.sms_count||0) > 0 ? 'var(--text)' : 'var(--text3)' }}>{n.sms_count||0}</span>
-                          {(n.sms_count||0) > 0 && <span style={{ fontSize: 10, color: 'var(--text3)' }}>msgs</span>}
-                        </div>
-                      </td>
-                      <td><span style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtTime(n.last_received)}</span></td>
-                      <td>
-                        {n.whatsapp_created
-                          ? <span className="badge badge-green" style={{ fontSize: 10 }}><i className="bi bi-whatsapp" style={{ fontSize: 9 }} /> Linked</span>
-                          : <span style={{ fontSize: 11, color: 'var(--text3)' }}>—</span>}
-                      </td>
-                      <td>
-                        {editId === n.id ? (
-                          <div style={{ display: 'flex', gap: 4 }} onClick={e => e.stopPropagation()}>
-                            <input value={editNote} onChange={e => setEditNote(e.target.value)}
-                              style={{ width: 120, fontSize: 11, padding: '3px 7px' }}
-                              onKeyDown={e => { if (e.key === 'Enter') saveNote(n.id); if (e.key === 'Escape') setEditId(null) }}
-                              autoFocus />
-                            <button className="btn-primary btn-xs" onClick={() => saveNote(n.id)}>✓</button>
-                            <button className="btn-ghost btn-xs" onClick={() => setEditId(null)}>✕</button>
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: 11, color: n.note ? 'var(--text2)' : 'var(--text3)', fontStyle: n.note ? 'italic' : 'normal' }}
-                            onClick={e => { e.stopPropagation(); setEditId(n.id); setEditNote(n.note||'') }}>
-                            {n.note || <span style={{ opacity: .4 }}>+ add note</span>}
-                          </span>
-                        )}
-                      </td>
-                      <td onClick={e => e.stopPropagation()}>
-                        <div style={{ display: 'flex', gap: 4 }}>
-                          <button onClick={() => copyPhone(n.phone)} className="btn-ghost btn-xs" title="Copy number">
-                            <i className={`bi ${copiedItem === n.phone ? 'bi-clipboard-check-fill' : 'bi-clipboard'}`} style={{ fontSize: 11 }} />
-                          </button>
-                          <button onClick={() => deleteNumber(n.id)} className="btn-ghost btn-xs" title="Delete" style={{ color: 'var(--accent)' }}>
-                            <i className="bi bi-trash-fill" style={{ fontSize: 11 }} />
-                          </button>
-                          <button onClick={() => toggleExpand(n)} className="btn-ghost btn-xs" title="View SMS">
-                            <i className={`bi ${expandedId === n.id ? 'bi-chevron-up' : 'bi-chevron-down'}`} style={{ fontSize: 11 }} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
+      )}
 
-                    {/* ── Expanded SMS panel ── */}
-                    {expandedId === n.id && (
-                      <tr key={`exp-${n.id}`}>
-                        <td colSpan={9} style={{ padding: 0, background: 'var(--bg)' }}>
-                          <div style={{ padding: '16px 20px 20px', borderTop: '2px solid var(--accent)' }}>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-                              <div style={{ width: 32, height: 32, borderRadius: 8, background: 'rgba(229,9,20,.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                                <i className="bi bi-chat-dots-fill" style={{ color: 'var(--accent)', fontSize: 14 }} />
-                              </div>
-                              <div>
-                                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>SMS for <span style={{ fontFamily: 'monospace' }}>{n.phone}</span></div>
-                                <div style={{ fontSize: 11, color: 'var(--text3)' }}>{n.country_name} · {n.status}</div>
-                              </div>
-                              <span className="live-badge" style={{ fontSize: 10 }}><span className="live-dot" />5s live</span>
-                              <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)' }}>
-                                {(smsMap[n.id] || []).length} message{(smsMap[n.id] || []).length !== 1 ? 's' : ''}
-                              </span>
-                            </div>
+      {/* Loading */}
+      {loading&&(
+        <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:200,flexDirection:'column',gap:14}}>
+          <div style={{width:36,height:36,borderRadius:'50%',border:`3px solid ${G.accentDim}`,borderTop:`3px solid ${G.accent}`,animation:'spin .8s linear infinite'}}/>
+          <p style={{color:G.text3,fontSize:13}}>Loading numbers…</p>
+        </div>
+      )}
 
-                            {smsLoad[n.id] ? (
-                              <div style={{ color: 'var(--text3)', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
-                                <i className="bi bi-arrow-repeat animate-spin" /> Loading…
-                              </div>
-                            ) : !smsMap[n.id] || smsMap[n.id].length === 0 ? (
-                              <div style={{ textAlign: 'center', padding: '24px 0', color: 'var(--text3)' }}>
-                                <i className="bi bi-chat-dots-fill" style={{ fontSize: 32, opacity: .2, display: 'block', marginBottom: 8 }} />
-                                <p style={{ fontSize: 13 }}>No SMS for this number yet.</p>
-                              </div>
-                            ) : (
-                              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(280px,1fr))', gap: 8, maxHeight: 320, overflowY: 'auto' }}>
-                                {smsMap[n.id].map((msg: any) => {
-                                  const svcColor = SVC_COLORS[msg.service] || 'var(--accent)'
-                                  return (
-                                    <div key={msg.id} style={{ padding: '10px 13px', background: 'var(--bg2)', borderRadius: 10, border: '1px solid var(--border)', position: 'relative', overflow: 'hidden' }}>
-                                      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, background: svcColor }} />
-                                      <div style={{ paddingLeft: 8 }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
-                                          <span style={{ fontSize: 10, fontWeight: 700, color: svcColor, background: `${svcColor}18`, border: `1px solid ${svcColor}33`, padding: '1px 7px', borderRadius: 4 }}>
-                                            {msg.service || 'Unknown'}
-                                          </span>
-                                          <span style={{ fontSize: 10, color: 'var(--text3)', marginLeft: 'auto' }}>
-                                            <i className="bi bi-clock-fill" style={{ marginRight: 3 }} />
-                                            {fmtTime(msg.received_at)}
-                                          </span>
-                                        </div>
-                                        <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 5 }}>
-                                          <i className="bi bi-person-fill" style={{ marginRight: 4, color: 'var(--text3)', fontSize: 10 }} />
-                                          {msg.sender}
-                                        </div>
-                                        <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, marginBottom: msg.otp ? 8 : 0 }}>
-                                          {msg.body}
-                                        </p>
-                                        {msg.otp && (
-                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                            <div style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: 22, letterSpacing: 5, color: 'var(--accent)', background: 'rgba(229,9,20,.08)', border: '1px solid rgba(229,9,20,.3)', padding: '4px 12px', borderRadius: 8 }}>
-                                              {msg.otp}
-                                            </div>
-                                            <button
-                                              onClick={() => { navigator.clipboard.writeText(msg.otp).catch(() => {}); setCopiedItem(msg.otp); setTimeout(() => setCopiedItem(null), 2000) }}
-                                              className={copiedItem === msg.otp ? 'btn-success btn-xs' : 'btn-secondary btn-xs'}
-                                              title="Copy OTP"
-                                            >
-                                              <i className={`bi ${copiedItem === msg.otp ? 'bi-clipboard-check-fill' : 'bi-clipboard-fill'}`} style={{ fontSize: 11 }} />
-                                              {copiedItem === msg.otp ? 'Copied!' : 'Copy'}
-                                            </button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  )
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                ))}
-              </tbody>
-            </table>
+      {/* Empty state */}
+      {!loading&&nums.length===0&&(
+        <div style={{
+          background:G.card,border:`1px dashed ${G.border2}`,borderRadius:16,
+          padding:'60px 40px',textAlign:'center',
+        }}>
+          <i className="bi bi-phone-fill" style={{fontSize:48,color:G.text3,display:'block',marginBottom:16}}/>
+          <h3 style={{margin:'0 0 8px',color:G.text1,fontSize:18,fontWeight:700}}>No Numbers Yet</h3>
+          <p style={{color:G.text2,fontSize:13,marginBottom:24,lineHeight:1.6,maxWidth:400,margin:'0 auto 24px'}}>
+            Load demo numbers or import real data from iVASMS.com using your browser cookies.
+          </p>
+          <div style={{display:'flex',gap:12,justifyContent:'center',flexWrap:'wrap'}}>
+            <Btn onClick={inject} icon="bi-download" label={injecting?'Loading…':'Load Demo Numbers'} color="primary" loading={injecting}/>
+            <Btn onClick={()=>setShowImport(true)} icon="bi-cookie" label="Import Real Cookies"/>
           </div>
         </div>
       )}
 
-      {/* ── Info box about CF protection ── */}
-      {numbers.length > 0 && (
-        <div className="alert alert-info" style={{ fontSize: 12 }}>
-          <i className="bi bi-shield-fill-check" style={{ color: 'var(--blue)' }} />
-          <div>
-            <strong>About iVASMS Sync:</strong> Numbers are loaded from your iVASMS account (<code>ohlivvy53@gmail.com</code>).
-            Live Sync tries direct scraping, but iVASMS may be behind Cloudflare Bot Protection from server IPs.
-            Use <strong>Load Numbers</strong> to always get your account numbers instantly.
-          </div>
+      {/* TABLE VIEW */}
+      {!loading&&filtered.length>0&&view==='table'&&(
+        <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:14,overflow:'hidden'}}>
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead>
+              <tr style={{background:G.card2}}>
+                <th style={{padding:'12px 16px',width:40}}>
+                  <input type="checkbox" checked={selected.size===filtered.length&&filtered.length>0}
+                    onChange={e=>setSelected(e.target.checked?new Set(filtered.map((n:any)=>n.id)):new Set())}
+                    style={{accentColor:G.accent,cursor:'pointer'}}/>
+                </th>
+                {[
+                  {label:'Number',  field:'phone'},
+                  {label:'Country', field:'country_name'},
+                  {label:'Status',  field:'status'},
+                  {label:'SMS',     field:'sms_count'},
+                  {label:'Created', field:'created_at'},
+                  {label:'Note',    field:'note'},
+                  {label:'',        field:null},
+                ].map(h=>(
+                  <th key={h.label} onClick={h.field?()=>toggleSort(h.field!):undefined} style={{
+                    padding:'12px 14px',textAlign:'left',fontSize:10,fontWeight:700,
+                    color:G.text3,textTransform:'uppercase',letterSpacing:'0.06em',
+                    cursor:h.field?'pointer':'default',userSelect:'none',whiteSpace:'nowrap',
+                  }}>
+                    {h.label}
+                    {h.field&&sortBy===h.field&&(
+                      <i className={`bi bi-chevron-${sortDir==='asc'?'up':'down'}`} style={{fontSize:9,marginLeft:4,color:G.accent}}/>
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map(num=>{
+                const isExp=expandedId===num.id
+                const isActive=(num.status||'active')==='active'
+                const isStarred=starred.has(num.id)
+                const isSel=selected.has(num.id)
+                return [
+                  <tr key={num.id} className="row-hover" style={{
+                    cursor:'pointer',borderTop:`1px solid ${G.border}`,
+                    background:isSel?'rgba(124,58,237,0.06)':'transparent',
+                    transition:'background .15s',
+                  }}>
+                    <td style={{padding:'13px 16px'}} onClick={e=>e.stopPropagation()}>
+                      <input type="checkbox" checked={isSel}
+                        onChange={e=>{setSelected(p=>{const n=new Set(p);e.target.checked?n.add(num.id):n.delete(num.id);return n})}}
+                        style={{accentColor:G.accent,cursor:'pointer'}}/>
+                    </td>
+                    <td style={{padding:'13px 14px'}} onClick={()=>loadSms(num)}>
+                      <div style={{display:'flex',alignItems:'center',gap:10}}>
+                        <div style={{
+                          width:34,height:34,borderRadius:10,
+                          background:`${G.accent}15`,border:`1px solid ${G.accent}25`,
+                          display:'flex',alignItems:'center',justifyContent:'center',fontSize:16,
+                        }}><Flag code={num.country||'US'}/></div>
+                        <div>
+                          <div style={{fontSize:13,fontWeight:700,color:G.text1,fontFamily:'monospace',letterSpacing:'0.02em'}}>{num.phone}</div>
+                          <div style={{fontSize:10,color:G.text3}}>ID: {num.ivasms_id||'—'}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{padding:'13px 14px'}} onClick={()=>loadSms(num)}>
+                      <span style={{fontSize:12,color:G.text2}}>{num.country_name||num.country||'—'}</span>
+                    </td>
+                    <td style={{padding:'13px 14px'}} onClick={()=>loadSms(num)}>
+                      <span style={{
+                        display:'inline-flex',alignItems:'center',gap:5,
+                        padding:'3px 9px',borderRadius:20,fontSize:11,fontWeight:700,
+                        background:isActive?G.greenDim:'rgba(107,114,128,0.1)',
+                        color:isActive?G.green:'#6b7280',
+                        border:`1px solid ${isActive?'rgba(16,185,129,0.3)':'rgba(107,114,128,0.2)'}`,
+                      }}>
+                        <span style={{width:5,height:5,borderRadius:'50%',background:isActive?G.green:'#6b7280',animation:isActive?'glow 2s infinite':undefined}}/>
+                        {num.status||'active'}
+                      </span>
+                    </td>
+                    <td style={{padding:'13px 14px'}} onClick={()=>loadSms(num)}>
+                      <span style={{fontSize:13,fontWeight:700,color:num.sms_count>0?G.blue:G.text3}}>{num.sms_count||0}</span>
+                    </td>
+                    <td style={{padding:'13px 14px'}} onClick={()=>loadSms(num)}>
+                      <span style={{fontSize:11,color:G.text3}}>{num.created_at?new Date(num.created_at).toLocaleDateString():'-'}</span>
+                    </td>
+                    <td style={{padding:'13px 14px'}}>
+                      {editNote?.id===num.id ? (
+                        <div style={{display:'flex',gap:6,alignItems:'center'}} onClick={e=>e.stopPropagation()}>
+                          <input value={editNote?.val??''} onChange={e=>setEditNote({id:num.id,val:e.target.value})} onKeyDown={e=>{if(e.key==='Enter')saveNote();if(e.key==='Escape')setEditNote(null)}}
+                            style={{padding:'4px 8px',borderRadius:6,background:G.card3,border:`1px solid ${G.border2}`,color:G.text1,fontSize:12,outline:'none',width:120}} autoFocus/>
+                          <button onClick={saveNote} style={{padding:'4px 8px',borderRadius:6,background:G.greenDim,border:`1px solid ${G.green}40`,color:G.green,fontSize:11,cursor:'pointer',fontWeight:700}}>✓</button>
+                          <button onClick={()=>setEditNote(null)} style={{padding:'4px 8px',borderRadius:6,background:G.redDim,border:`1px solid ${G.red}40`,color:G.red,fontSize:11,cursor:'pointer'}}>✗</button>
+                        </div>
+                      ) : (
+                        <button onClick={e=>{e.stopPropagation();setEditNote({id:num.id,val:num.note||''})}} style={{
+                          background:'none',border:'none',cursor:'pointer',color:num.note?G.text2:G.text3,
+                          fontSize:12,padding:'2px 0',textAlign:'left',maxWidth:120,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                        }} title={num.note||'Add note'}>
+                          {num.note||<span style={{opacity:.4}}>+ note</span>}
+                        </button>
+                      )}
+                    </td>
+                    <td style={{padding:'13px 14px'}}>
+                      <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                        <button onClick={e=>{e.stopPropagation();toggleStar(num.id)}} style={{background:'none',border:'none',cursor:'pointer',padding:2,color:isStarred?G.yellow:G.text3,fontSize:14,transition:'color .15s'}}>
+                          <i className={`bi ${isStarred?'bi-star-fill':'bi-star'}`}/>
+                        </button>
+                        <button onClick={e=>{e.stopPropagation();copyText(num.phone,num.id)}} style={{background:'none',border:'none',cursor:'pointer',padding:2,color:copied===num.id?G.green:G.text3,fontSize:13,transition:'color .15s'}}>
+                          <i className={`bi ${copied===num.id?'bi-check-circle-fill':'bi-copy'}`}/>
+                        </button>
+                        <button onClick={e=>{e.stopPropagation();loadSms(num)}} style={{background:'none',border:'none',cursor:'pointer',padding:2,color:isExp?G.accent:G.text3,fontSize:13,transition:'color .15s'}}>
+                          <i className={`bi bi-chevron-${isExp?'up':'down'}`}/>
+                        </button>
+                      </div>
+                    </td>
+                  </tr>,
+                  isExp && (
+                    <tr key={`${num.id}-sms`}>
+                      <td colSpan={8} style={{padding:0,borderTop:'none'}}>
+                        <div style={{background:G.card2,borderTop:`1px solid ${G.border}`,padding:'16px 20px',animation:'fadeIn .2s ease'}}>
+                          {smsLoading[num.id]?(
+                            <div style={{display:'flex',alignItems:'center',gap:10,color:G.text3,fontSize:13}}>
+                              <div style={{width:14,height:14,borderRadius:'50%',border:`2px solid ${G.accentDim}`,borderTop:`2px solid ${G.accent}`,animation:'spin .8s linear infinite'}}/>
+                              Loading messages…
+                            </div>
+                          ) : smsMap[num.id]?.length===0 ? (
+                            <span style={{color:G.text3,fontSize:13}}>No SMS for this number yet</span>
+                          ) : (
+                            <div>
+                              <div style={{fontSize:11,fontWeight:700,color:G.text3,marginBottom:12,textTransform:'uppercase',letterSpacing:'0.06em'}}>
+                                Recent Messages ({smsMap[num.id]?.length||0})
+                              </div>
+                              <div style={{display:'flex',flexDirection:'column',gap:8}}>
+                                {(smsMap[num.id]||[]).map((m:any)=>(
+                                  <div key={m.id} style={{
+                                    background:G.card,borderRadius:10,padding:'12px 14px',
+                                    border:`1px solid ${G.border}`,display:'flex',gap:12,alignItems:'flex-start',
+                                  }}>
+                                    <div style={{
+                                      width:32,height:32,borderRadius:8,flexShrink:0,
+                                      background:`${SVC_COLORS[m.service]||G.text3}20`,
+                                      display:'flex',alignItems:'center',justifyContent:'center',
+                                      fontSize:10,fontWeight:800,color:SVC_COLORS[m.service]||G.text3,
+                                    }}>{(m.service||'?').slice(0,2).toUpperCase()}</div>
+                                    <div style={{flex:1,minWidth:0}}>
+                                      <div style={{display:'flex',gap:8,alignItems:'center',marginBottom:3}}>
+                                        <span style={{fontSize:12,fontWeight:700,color:G.text1}}>{m.service||'Unknown'}</span>
+                                        <span style={{fontSize:10,color:G.text3}}>from {m.sender}</span>
+                                        {m.otp&&<span style={{fontSize:10,fontWeight:800,padding:'1px 6px',borderRadius:10,background:G.yellowDim,color:G.yellow,border:`1px solid ${G.yellow}30`}}>OTP</span>}
+                                      </div>
+                                      <div style={{fontSize:12,color:G.text2,lineHeight:1.5}}>{m.body}</div>
+                                      {m.otp&&<div style={{marginTop:6,fontSize:18,fontWeight:800,color:G.yellow,letterSpacing:'0.15em'}}>{m.otp}</div>}
+                                    </div>
+                                    <span style={{fontSize:10,color:G.text3,whiteSpace:'nowrap',flexShrink:0}}>
+                                      {m.received_at?new Date(m.received_at).toLocaleString():''}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                ].filter(Boolean)
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {/* GRID VIEW */}
+      {!loading&&filtered.length>0&&view==='grid'&&(
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(240px,1fr))',gap:14}}>
+          {filtered.map(num=>{
+            const isActive=(num.status||'active')==='active'
+            const isStarred=starred.has(num.id)
+            return (
+              <div key={num.id} style={{
+                background:G.card,border:`1px solid ${G.border}`,borderRadius:14,
+                padding:'18px',cursor:'pointer',transition:'all .2s ease',position:'relative',
+              }}
+              onClick={()=>loadSms(num)}
+              onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.borderColor=G.accent;(e.currentTarget as HTMLDivElement).style.transform='translateY(-2px)'}}
+              onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.borderColor=G.border;(e.currentTarget as HTMLDivElement).style.transform='translateY(0)'}}
+              >
+                <div style={{position:'absolute',top:14,right:14,display:'flex',gap:8}}>
+                  <button onClick={e=>{e.stopPropagation();toggleStar(num.id)}} style={{background:'none',border:'none',cursor:'pointer',padding:2,color:isStarred?G.yellow:G.text3,fontSize:14}}>
+                    <i className={`bi ${isStarred?'bi-star-fill':'bi-star'}`}/>
+                  </button>
+                </div>
+                <div style={{display:'flex',alignItems:'center',gap:12,marginBottom:14}}>
+                  <div style={{width:44,height:44,borderRadius:12,background:`${G.accent}15`,border:`1px solid ${G.accent}25`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:22}}>
+                    <Flag code={num.country||'US'}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:G.text1,fontFamily:'monospace'}}>{num.phone}</div>
+                    <div style={{fontSize:11,color:G.text3}}>{num.country_name||num.country||'—'}</div>
+                  </div>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+                  <span style={{
+                    display:'inline-flex',alignItems:'center',gap:4,
+                    padding:'3px 8px',borderRadius:20,fontSize:10,fontWeight:700,
+                    background:isActive?G.greenDim:'rgba(107,114,128,0.1)',
+                    color:isActive?G.green:'#6b7280',
+                    border:`1px solid ${isActive?'rgba(16,185,129,0.3)':'rgba(107,114,128,0.2)'}`,
+                  }}>
+                    <span style={{width:5,height:5,borderRadius:'50%',background:isActive?G.green:'#6b7280',animation:isActive?'glow 2s infinite':undefined}}/>
+                    {num.status||'active'}
+                  </span>
+                  <div style={{display:'flex',alignItems:'center',gap:5,fontSize:11,color:G.blue,fontWeight:700}}>
+                    <i className="bi bi-chat-dots-fill" style={{fontSize:11}}/>
+                    {num.sms_count||0} SMS
+                  </div>
+                </div>
+                {num.note&&<div style={{fontSize:11,color:G.text2,background:G.card2,borderRadius:7,padding:'6px 10px',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{num.note}</div>}
+                <div style={{marginTop:10,display:'flex',gap:8}}>
+                  <button onClick={e=>{e.stopPropagation();copyText(num.phone,num.id)}} style={{
+                    flex:1,padding:'7px',borderRadius:8,background:G.card2,border:`1px solid ${G.border}`,
+                    color:copied===num.id?G.green:G.text3,fontSize:11,fontWeight:600,cursor:'pointer',
+                    display:'flex',alignItems:'center',justifyContent:'center',gap:5,
+                  }}>
+                    <i className={`bi ${copied===num.id?'bi-check':'bi-copy'}`}/>{copied===num.id?'Copied':'Copy'}
+                  </button>
+                  <button onClick={e=>{e.stopPropagation();setEditNote({id:num.id,val:num.note||''})}} style={{
+                    flex:1,padding:'7px',borderRadius:8,background:G.card2,border:`1px solid ${G.border}`,
+                    color:G.text3,fontSize:11,fontWeight:600,cursor:'pointer',
+                    display:'flex',alignItems:'center',justifyContent:'center',gap:5,
+                  }}>
+                    <i className="bi bi-pencil-fill"/>Note
+                  </button>
+                </div>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

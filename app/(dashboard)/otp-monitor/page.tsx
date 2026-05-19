@@ -1,308 +1,308 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-const SVC_COLORS: Record<string, string> = {
-  Google: '#4285f4', WhatsApp: '#25d366', Telegram: '#229ed9', Facebook: '#1877f2',
-  Twitter: '#1da1f2', Amazon: '#ff9900', Microsoft: '#00a4ef', Apple: '#777',
-  PayPal: '#003087', Netflix: '#e50914', TikTok: '#ff0050', Discord: '#5865f2',
-  LinkedIn: '#0a66c2', Binance: '#f3ba2f', Coinbase: '#0052ff', Instagram: '#e1306c',
-  Snapchat: '#f7c948', Uber: '#555', Shopify: '#96bf48', Unknown: '#6a6a8a',
+const G = {
+  bg:'#0a0a0f', card:'#111118', card2:'#16161f', card3:'#1a1a24',
+  border:'rgba(255,255,255,0.07)', border2:'rgba(255,255,255,0.12)',
+  text1:'#f0f0f8', text2:'#a0a0b8', text3:'#60607a',
+  accent:'#7c3aed', accentHover:'#8b5cf6', accentDim:'rgba(124,58,237,0.15)',
+  green:'#10b981', greenDim:'rgba(16,185,129,0.12)',
+  red:'#ef4444', redDim:'rgba(239,68,68,0.1)',
+  yellow:'#f59e0b', yellowDim:'rgba(245,158,11,0.1)',
+  blue:'#3b82f6', blueDim:'rgba(59,130,246,0.1)',
+  pink:'#ec4899',
+}
+const SVC_COLORS: Record<string,string> = {
+  Google:'#4285f4',WhatsApp:'#25d366',Telegram:'#229ed9',Facebook:'#1877f2',
+  Amazon:'#ff9900',Microsoft:'#00a4ef',Apple:'#a8a8a8',Twitter:'#1da1f2',
+  Netflix:'#e50914',TikTok:'#ff0050',Discord:'#5865f2',LinkedIn:'#0a66c2',
+  Binance:'#f3ba2f',PayPal:'#003087',Coinbase:'#0052ff',Instagram:'#e1306c',
 }
 
-const SVC_ICONS: Record<string, string> = {
-  Google: 'bi-google', WhatsApp: 'bi-whatsapp', Telegram: 'bi-telegram',
-  Facebook: 'bi-facebook', Twitter: 'bi-twitter-x', Amazon: 'bi-amazon',
-  Microsoft: 'bi-microsoft', Apple: 'bi-apple', LinkedIn: 'bi-linkedin',
-  Discord: 'bi-discord', TikTok: 'bi-tiktok', Instagram: 'bi-instagram',
-  Snapchat: 'bi-snapchat', YouTube: 'bi-youtube',
+function beep() {
+  try {
+    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
+    const osc = ctx.createOscillator()
+    const gain = ctx.createGain()
+    osc.connect(gain); gain.connect(ctx.destination)
+    osc.frequency.setValueAtTime(880, ctx.currentTime)
+    osc.frequency.exponentialRampToValueAtTime(440, ctx.currentTime + 0.1)
+    gain.gain.setValueAtTime(0.3, ctx.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3)
+    osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.3)
+  } catch {}
 }
 
-export default function OTPMonitorPage() {
-  const [otps,      setOtps]      = useState<any[]>([])
-  const [numbers,   setNumbers]   = useState<any[]>([])
-  const [loading,   setLoading]   = useState(true)
-  const [watching,  setWatching]  = useState(false)
-  const [copied,    setCopied]    = useState<string|null>(null)
-  const [filter,    setFilter]    = useState({ service: '', numberId: '' })
-  const [newOtp,    setNewOtp]    = useState<any>(null)
-  const [alertOn,   setAlertOn]   = useState(false)
-  const [count30s,  setCount30s]  = useState(30)
-  const pollRef  = useRef<any>(null)
-  const lastSeen = useRef<string>(new Date().toISOString())
-  const audioRef = useRef<any>(null)
+export default function OtpMonitor() {
+  const [otps,       setOtps]       = useState<any[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [watching,   setWatching]   = useState(false)
+  const [serviceF,   setServiceF]   = useState('')
+  const [services,   setServices]   = useState<string[]>([])
+  const [newAlert,   setNewAlert]   = useState<any|null>(null)
+  const [copied,     setCopied]     = useState<string|null>(null)
+  const [msg,        setMsg]        = useState<{ok:boolean,text:string}|null>(null)
+  const seenRef  = useRef<Set<string>>(new Set())
+  const watchRef = useRef<any>(null)
+  const now = Date.now()
 
-  const loadOtps = useCallback(async () => {
-    const params = new URLSearchParams({ limit: '50' })
-    if (filter.service)  params.set('service',  filter.service)
-    if (filter.numberId) params.set('numberId', filter.numberId)
+  const load = useCallback(async (quiet=false) => {
+    if (!quiet) setLoading(true)
     try {
-      const r = await fetch(`/api/otp/latest?${params}`)
-      if (r.ok) { const d = await r.json(); setOtps(d.otps || []) }
+      const r = await fetch('/api/ivasms/sms?hasOtp=true&limit=100')
+      if (r.ok) {
+        const d = await r.json()
+        const arr: any[] = d.messages || []
+        setOtps(arr)
+        const svcs = [...new Set<string>(arr.map((o:any)=>String(o.service||'')))] as string[]
+        setServices(svcs.filter(Boolean))
+        if (watching) {
+          const newOnes = arr.filter(o => !seenRef.current.has(String(o.id||'')))
+          if (newOnes.length > 0) {
+            newOnes.forEach(o => seenRef.current.add(String(o.id||'')))
+            setNewAlert(newOnes[0])
+            beep()
+            setTimeout(() => setNewAlert(null), 8000)
+          }
+        } else {
+          arr.forEach(o => seenRef.current.add(String(o.id||'')))
+        }
+      }
     } catch {}
     setLoading(false)
-  }, [filter])
+  }, [watching])
+
+  useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    Promise.all([
-      loadOtps(),
-      fetch('/api/ivasms/numbers').then(r => r.json()).then(d => setNumbers(d.numbers || [])).catch(() => {}),
-    ])
-  }, [loadOtps])
+    if (watching) {
+      watchRef.current = setInterval(() => load(true), 3000)
+    } else {
+      clearInterval(watchRef.current)
+    }
+    return () => clearInterval(watchRef.current)
+  }, [watching, load])
 
-  // Countdown to next auto-refresh
-  useEffect(() => {
-    const t = setInterval(() => {
-      setCount30s(p => {
-        if (p <= 1) { loadOtps(); return 30 }
-        return p - 1
-      })
-    }, 1000)
-    return () => clearInterval(t)
-  }, [loadOtps])
-
-  // Live watch polling
-  useEffect(() => {
-    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null }
-    if (!watching) return
-    pollRef.current = setInterval(async () => {
-      try {
-        const params = new URLSearchParams({ since: lastSeen.current })
-        if (filter.service)  params.set('service',  filter.service)
-        if (filter.numberId) params.set('numberId', filter.numberId)
-        const r = await fetch(`/api/otp/watch?${params}`)
-        if (r.ok) {
-          const d = await r.json()
-          if (d.found && d.latest) {
-            setNewOtp(d.latest)
-            lastSeen.current = new Date().toISOString()
-            loadOtps()
-            setTimeout(() => setNewOtp(null), 20000)
-            // Play alert sound
-            if (alertOn) {
-              try {
-                const ctx  = new AudioContext()
-                const osc  = ctx.createOscillator()
-                const gain = ctx.createGain()
-                osc.connect(gain); gain.connect(ctx.destination)
-                osc.frequency.setValueAtTime(880, ctx.currentTime)
-                osc.frequency.setValueAtTime(1100, ctx.currentTime + 0.1)
-                gain.gain.setValueAtTime(0.3, ctx.currentTime)
-                gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4)
-                osc.start(ctx.currentTime); osc.stop(ctx.currentTime + 0.4)
-              } catch {}
-            }
-          }
-        }
-      } catch {}
-    }, 3000)
-    return () => { if (pollRef.current) clearInterval(pollRef.current) }
-  }, [watching, filter, loadOtps, alertOn])
-
-  const copyOtp = (otp: string, id: string) => {
-    navigator.clipboard.writeText(otp).catch(() => {})
-    setCopied(id)
-    setTimeout(() => setCopied(null), 2500)
+  const copyText = (text: string, key: string) => {
+    navigator.clipboard.writeText(text).catch(() => {})
+    setCopied(key); setTimeout(() => setCopied(null), 2000)
   }
 
-  const fmtTime = (ts: string) => {
-    try {
-      const diff = (Date.now() - new Date(ts).getTime()) / 1000
-      if (diff < 60)    return `${Math.floor(diff)}s ago`
-      if (diff < 3600)  return `${Math.floor(diff/60)}m ago`
-      if (diff < 86400) return `${Math.floor(diff/3600)}h ago`
-      return new Date(ts).toLocaleDateString()
-    } catch { return ts }
-  }
+  const filtered = serviceF ? otps.filter(o => o.service === serviceF) : otps
+  const recent   = filtered.filter(o => now - new Date(o.received_at).getTime() < 300000)
+  const last5min = otps.filter(o => now - new Date(o.received_at).getTime() < 300000)
+  const last1h   = otps.filter(o => now - new Date(o.received_at).getTime() < 3600000)
 
-  const services = [...new Set(otps.map(o => o.service).filter(Boolean))]
+  const showMsg = (ok:boolean,text:string,ms=5000)=>{setMsg({ok,text});setTimeout(()=>setMsg(null),ms)}
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{maxWidth:1400,margin:'0 auto'}}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+        @keyframes slideIn{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes glow{0%,100%{box-shadow:0 0 8px rgba(245,158,11,.5)}50%{box-shadow:0 0 20px rgba(245,158,11,.9)}}
+        @keyframes newBadge{0%{transform:scale(1)}50%{transform:scale(1.1)}100%{transform:scale(1)}}
+      `}</style>
 
-      {/* ── Header ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24,flexWrap:'wrap',gap:12}}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <i className="bi bi-key-fill" style={{ color: 'var(--yellow)', fontSize: 20 }} />
+          <h1 style={{margin:0,fontSize:24,fontWeight:800,color:G.text1,letterSpacing:'-0.5px',display:'flex',alignItems:'center',gap:10}}>
+            <i className="bi bi-key-fill" style={{color:G.yellow,fontSize:20}}/>
             OTP Monitor
-          </h2>
-          <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 4 }}>
-            Real-time OTP detection · {otps.length} codes · refresh in {count30s}s
-          </p>
+          </h1>
+          <p style={{margin:'4px 0 0',fontSize:12,color:G.text3}}>{otps.length} OTPs collected · {last5min.length} new in last 5 min</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          <button onClick={() => setAlertOn(p => !p)} className={alertOn ? 'btn-success btn-sm' : 'btn-secondary btn-sm'} style={{ gap: 6 }}>
-            <i className={`bi ${alertOn ? 'bi-bell-fill' : 'bi-bell-slash-fill'}`} style={{ fontSize: 13 }} />
-            {alertOn ? 'Alert ON' : 'Alert OFF'}
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+          <button onClick={()=>setWatching(w=>!w)} style={{
+            display:'flex',alignItems:'center',gap:8,padding:'10px 20px',borderRadius:10,
+            background:watching?`linear-gradient(135deg,${G.green},#059669)`:G.card2,
+            border:`1px solid ${watching?G.green:G.border2}`,
+            color:watching?'#fff':G.text2,fontSize:13,fontWeight:700,cursor:'pointer',
+            transition:'all .2s',
+            ...(watching?{boxShadow:`0 4px 12px rgba(16,185,129,0.3)`}:{}),
+          }}>
+            <div style={{width:8,height:8,borderRadius:'50%',background:watching?'#fff':G.text3,animation:watching?'pulse 1s infinite':undefined}}/>
+            {watching ? '⏹ Stop Watch' : '▶ Watch Mode'}
           </button>
-          <button onClick={() => setWatching(w => !w)} className={watching ? 'btn-success btn-sm' : 'btn-primary btn-sm'} style={{ gap: 7 }}>
-            <span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
-              background: watching ? 'var(--green)' : '#fff',
-              animation: watching ? 'livePulse 1.5s ease-in-out infinite' : 'none' }} />
-            {watching ? 'Watching LIVE…' : 'Start Live Watch'}
-          </button>
-          <button onClick={loadOtps} className="btn-secondary btn-sm" style={{ gap: 6 }}>
-            <i className="bi bi-arrow-repeat" style={{ fontSize: 14 }} />Refresh
+          <button onClick={()=>load()} style={{
+            display:'flex',alignItems:'center',gap:8,padding:'10px 16px',borderRadius:10,
+            background:G.card2,border:`1px solid ${G.border2}`,color:G.text2,fontSize:12,fontWeight:600,cursor:'pointer',
+          }}>
+            <i className="bi bi-arrow-clockwise"/>Refresh
           </button>
         </div>
       </div>
 
-      {/* ── NEW OTP ALERT ── */}
-      {newOtp && (
-        <div style={{ background: 'linear-gradient(135deg, rgba(255,193,7,.15), rgba(255,152,0,.1))',
-          border: '2px solid rgba(255,193,7,.5)', borderRadius: 14, padding: '18px 22px',
-          display: 'flex', alignItems: 'center', gap: 18, animation: 'popIn .3s ease' }}>
-          <div style={{ width: 56, height: 56, borderRadius: 14, background: 'rgba(255,193,7,.2)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-            animation: 'livePulse 1.5s ease-in-out infinite' }}>
-            <i className="bi bi-key-fill" style={{ color: 'var(--yellow)', fontSize: 26 }} />
+      {/* New OTP Alert Banner */}
+      {newAlert && (
+        <div style={{
+          padding:'16px 20px',borderRadius:12,marginBottom:20,
+          background:`linear-gradient(135deg, rgba(245,158,11,0.15), rgba(245,158,11,0.05))`,
+          border:`2px solid ${G.yellow}60`,animation:'slideIn .3s ease',
+          display:'flex',alignItems:'center',gap:16,
+        }}>
+          <div style={{fontSize:28,animation:'glow 1s infinite'}}>🔔</div>
+          <div style={{flex:1}}>
+            <div style={{fontSize:14,fontWeight:800,color:G.yellow,marginBottom:4}}>New OTP Received!</div>
+            <div style={{fontSize:13,color:G.text1}}><strong>{newAlert.service}</strong> · {newAlert.body?.slice(0,80)}</div>
           </div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 12, color: 'var(--yellow)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: .7, marginBottom: 4 }}>
-              🔔 New OTP Received!
-            </div>
-            <div style={{ fontSize: 12, color: 'var(--text2)', marginBottom: 10 }}>
-              <strong>{newOtp.service}</strong> · {newOtp.phone_number} · from <strong>{newOtp.sender}</strong>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-              <div style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: 36, letterSpacing: 8,
-                color: 'var(--yellow)', background: 'rgba(255,193,7,.1)', border: '2px solid rgba(255,193,7,.4)',
-                padding: '6px 18px', borderRadius: 10 }}>
-                {newOtp.otp}
-              </div>
-              <button onClick={() => copyOtp(newOtp.otp, 'new')} className={copied === 'new' ? 'btn-success' : 'btn-primary'}
-                style={{ padding: '10px 20px', gap: 8 }}>
-                <i className={`bi ${copied === 'new' ? 'bi-clipboard-check-fill' : 'bi-clipboard-fill'}`} style={{ fontSize: 15 }} />
-                {copied === 'new' ? 'Copied!' : 'Copy OTP'}
-              </button>
-            </div>
+          <div style={{textAlign:'center'}}>
+            <div style={{fontSize:28,fontWeight:900,color:G.yellow,letterSpacing:'0.2em',fontFamily:'monospace',textShadow:`0 0 20px ${G.yellow}`}}>{newAlert.otp}</div>
+            <button onClick={()=>copyText(newAlert.otp,'alert')} style={{
+              marginTop:6,padding:'6px 16px',borderRadius:8,background:G.yellow,border:'none',
+              color:'#000',fontSize:11,fontWeight:800,cursor:'pointer',
+            }}>{copied==='alert'?'✓ Copied':'Copy'}</button>
           </div>
-          <button onClick={() => setNewOtp(null)} style={{ background: 'transparent', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 18, padding: 4, flexShrink: 0 }}>✕</button>
+          <button onClick={()=>setNewAlert(null)} style={{background:'none',border:'none',color:G.text3,cursor:'pointer',fontSize:18,padding:4}}>×</button>
         </div>
       )}
 
-      {/* ── Stats ── */}
-      {otps.length > 0 && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 10 }}>
-          {services.slice(0, 6).map(svc => {
-            const cnt = otps.filter(o => o.service === svc).length
-            const c = SVC_COLORS[svc] || 'var(--accent)'
-            const icon = SVC_ICONS[svc] || 'bi-shield-fill-check'
-            return (
-              <button key={svc} onClick={() => setFilter(f => ({ ...f, service: f.service === svc ? '' : svc }))}
-                className="card card-sm"
-                style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', transition: 'all .2s',
-                  borderColor: filter.service === svc ? c : 'var(--border)',
-                  background: filter.service === svc ? `${c}12` : 'var(--card)',
-                  textAlign: 'left', border: `1px solid ${filter.service === svc ? c : 'var(--border)'}` }}>
-                <div style={{ width: 32, height: 32, borderRadius: 8, background: `${c}18`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                  <i className={`bi ${icon}`} style={{ color: c, fontSize: 15 }} />
-                </div>
-                <div>
-                  <div style={{ fontSize: 18, fontWeight: 900, color: c, lineHeight: 1 }}>{cnt}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase' }}>{svc}</div>
-                </div>
-              </button>
-            )
-          })}
-        </div>
-      )}
+      {msg&&<div style={{padding:'11px 16px',borderRadius:10,marginBottom:18,fontSize:13,fontWeight:600,background:msg.ok?G.greenDim:G.redDim,color:msg.ok?G.green:G.red,border:`1px solid ${msg.ok?'rgba(16,185,129,0.3)':'rgba(239,68,68,0.3)'}`}}>{msg.text}</div>}
 
-      {/* ── Filters ── */}
-      <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select value={filter.service} onChange={e => setFilter(f => ({ ...f, service: e.target.value }))} style={{ flex: '0 0 160px', width: 'auto' }}>
-          <option value="">All Services</option>
-          {services.map(s => <option key={s} value={s}>{s}</option>)}
-        </select>
-        <select value={filter.numberId} onChange={e => setFilter(f => ({ ...f, numberId: e.target.value }))} style={{ flex: '0 0 200px', width: 'auto' }}>
-          <option value="">All Numbers</option>
-          {numbers.map((n: any) => <option key={n.id} value={n.id}>{n.phone}</option>)}
-        </select>
-        {(filter.service || filter.numberId) && (
-          <button className="btn-ghost btn-sm" onClick={() => setFilter({ service: '', numberId: '' })}>
-            <i className="bi bi-x" style={{ fontSize: 15 }} />Clear
-          </button>
-        )}
-        <span style={{ marginLeft: 'auto', fontSize: 12, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <i className="bi bi-key-fill" style={{ color: 'var(--yellow)' }} />{otps.length} OTP codes
-        </span>
+      {/* Stat cards */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(160px,1fr))',gap:12,marginBottom:20}}>
+        {[
+          {label:'Total OTPs',   value:otps.length,     color:G.yellow, icon:'bi-key-fill'},
+          {label:'Last 5 min',   value:last5min.length, color:G.green,  icon:'bi-lightning-fill'},
+          {label:'Last hour',    value:last1h.length,   color:G.blue,   icon:'bi-clock-fill'},
+          {label:'Services',     value:services.length, color:G.accent, icon:'bi-grid-fill'},
+        ].map(s=>(
+          <div key={s.label} style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:12,padding:'14px 16px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+              <i className={`bi ${s.icon}`} style={{fontSize:11,color:s.color}}/>
+              <span style={{fontSize:10,fontWeight:700,color:G.text3,textTransform:'uppercase',letterSpacing:'0.06em'}}>{s.label}</span>
+            </div>
+            <span style={{fontSize:24,fontWeight:800,color:G.text1}}>{s.value}</span>
+          </div>
+        ))}
       </div>
 
-      {/* ── OTP Grid ── */}
-      {loading ? (
-        <div className="card" style={{ padding: 40, textAlign: 'center' }}>
-          <i className="bi bi-arrow-repeat animate-spin" style={{ fontSize: 28, color: 'var(--accent)', display: 'block', marginBottom: 12 }} />
-          <p style={{ color: 'var(--text3)' }}>Loading OTPs…</p>
+      {/* Service filter */}
+      {services.length>0&&(
+        <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:16}}>
+          <button onClick={()=>setServiceF('')} style={{
+            padding:'4px 14px',borderRadius:20,fontSize:11,fontWeight:700,cursor:'pointer',
+            background:!serviceF?G.yellowDim:G.card2,border:`1px solid ${!serviceF?G.yellow:G.border}`,
+            color:!serviceF?G.yellow:G.text3,
+          }}>All</button>
+          {services.map(svc=>(
+            <button key={svc} onClick={()=>setServiceF(serviceF===svc?'':svc)} style={{
+              padding:'4px 14px',borderRadius:20,fontSize:11,fontWeight:700,cursor:'pointer',
+              background:serviceF===svc?`${SVC_COLORS[svc]||G.yellow}20`:G.card2,
+              border:`1px solid ${serviceF===svc?(SVC_COLORS[svc]||G.yellow):G.border}`,
+              color:serviceF===svc?(SVC_COLORS[svc]||G.yellow):G.text3,
+            }}>{svc}</button>
+          ))}
         </div>
-      ) : otps.length === 0 ? (
-        <div className="card" style={{ padding: 56, textAlign: 'center' }}>
-          <i className="bi bi-key-fill" style={{ fontSize: 52, opacity: .15, display: 'block', marginBottom: 16, color: 'var(--yellow)' }} />
-          <p style={{ fontSize: 16, fontWeight: 700, color: 'var(--text2)', marginBottom: 8 }}>No OTPs Yet</p>
-          <p style={{ fontSize: 13, color: 'var(--text3)', marginBottom: 20, lineHeight: 1.7, maxWidth: 380, margin: '0 auto 20px' }}>
-            OTPs are automatically extracted from SMS messages. Load your numbers first to see verification codes.
-          </p>
-          <a href="/numbers" className="btn-primary btn-sm" style={{ display: 'inline-flex', gap: 7 }}>
-            <i className="bi bi-phone-fill" style={{ fontSize: 14 }} />Go to Numbers
-          </a>
+      )}
+
+      {/* Watch mode notice */}
+      {watching&&(
+        <div style={{
+          padding:'12px 16px',borderRadius:10,marginBottom:16,
+          background:'rgba(16,185,129,0.06)',border:`1px solid rgba(16,185,129,0.2)`,
+          display:'flex',alignItems:'center',gap:10,fontSize:13,color:G.green,
+        }}>
+          <div style={{width:8,height:8,borderRadius:'50%',background:G.green,animation:'pulse 1s infinite'}}/>
+          Watch mode active — checking every 3 seconds. Audio alert will play on new OTPs.
         </div>
-      ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(300px,1fr))', gap: 12 }}>
-          {otps.map((otp: any) => {
-            const c = SVC_COLORS[otp.service] || 'var(--accent)'
-            const icon = SVC_ICONS[otp.service] || 'bi-shield-fill-check'
-            const isNew = (Date.now() - new Date(otp.received_at).getTime()) < 300000 // 5 min = "new"
+      )}
+
+      {/* Loading */}
+      {loading&&(
+        <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:200,flexDirection:'column',gap:14}}>
+          <div style={{width:36,height:36,borderRadius:'50%',border:`3px solid ${G.yellowDim}`,borderTop:`3px solid ${G.yellow}`,animation:'spin .8s linear infinite'}}/>
+          <p style={{color:G.text3,fontSize:13}}>Loading OTPs…</p>
+        </div>
+      )}
+
+      {/* Empty */}
+      {!loading&&filtered.length===0&&(
+        <div style={{background:G.card,border:`1px dashed ${G.border2}`,borderRadius:14,padding:'60px 40px',textAlign:'center'}}>
+          <i className="bi bi-key" style={{fontSize:48,color:G.text3,display:'block',marginBottom:16}}/>
+          <h3 style={{margin:'0 0 8px',color:G.text1,fontSize:17,fontWeight:700}}>No OTPs Yet</h3>
+          <p style={{color:G.text2,fontSize:13}}>Load numbers to receive OTP codes.</p>
+        </div>
+      )}
+
+      {/* OTP Grid */}
+      {!loading&&filtered.length>0&&(
+        <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))',gap:14}}>
+          {filtered.map(otp=>{
+            const svcColor = SVC_COLORS[otp.service]||G.text3
+            const isNew = now - new Date(otp.received_at).getTime() < 300000
+            const age = Math.round((now - new Date(otp.received_at).getTime())/60000)
             return (
-              <div key={otp.id} className="card card-sm" style={{ position: 'relative', overflow: 'hidden', borderColor: isNew ? `${c}50` : 'var(--border)', transition: 'all .2s' }}>
-                {isNew && (
-                  <div style={{ position: 'absolute', top: 8, right: 8, fontSize: 9, fontWeight: 800, color: c, background: `${c}18`, padding: '2px 6px', borderRadius: 4, letterSpacing: .5 }}>NEW</div>
-                )}
-                <div style={{ position: 'absolute', top: 0, left: 0, width: 3, height: '100%', background: c, borderRadius: '3px 0 0 3px' }} />
-                <div style={{ paddingLeft: 10 }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-                    <div style={{ width: 30, height: 30, borderRadius: 8, background: `${c}18`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <i className={`bi ${icon}`} style={{ color: c, fontSize: 14 }} />
-                    </div>
+              <div key={otp.id} style={{
+                background:G.card, border:`1px solid ${isNew?`${G.yellow}60`:G.border}`,
+                borderRadius:14, padding:'20px',
+                transition:'all .2s ease',
+                ...(isNew?{boxShadow:`0 0 20px rgba(245,158,11,0.1)`}:{}),
+              }}>
+                {/* Service + new badge */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:14}}>
+                  <div style={{display:'flex',alignItems:'center',gap:10}}>
+                    <div style={{
+                      width:38,height:38,borderRadius:10,
+                      background:`${svcColor}20`,border:`1px solid ${svcColor}30`,
+                      display:'flex',alignItems:'center',justifyContent:'center',
+                      fontSize:12,fontWeight:800,color:svcColor,
+                    }}>{(otp.service||'?').slice(0,2).toUpperCase()}</div>
                     <div>
-                      <div style={{ fontSize: 12, fontWeight: 700, color: c }}>{otp.service}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text3)', fontFamily: 'monospace' }}>{otp.phone_number}</div>
+                      <div style={{fontSize:13,fontWeight:700,color:G.text1}}>{otp.service||'Unknown'}</div>
+                      <div style={{fontSize:11,color:G.text3}}>{otp.phone_number||''}</div>
                     </div>
-                    <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text3)' }}>{fmtTime(otp.received_at)}</span>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
-                    <div style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: 28, letterSpacing: 6,
-                      color: c, background: `${c}12`, border: `1px solid ${c}30`,
-                      padding: '5px 14px', borderRadius: 10 }}>
-                      {otp.otp}
-                    </div>
-                    <button onClick={() => copyOtp(otp.otp, otp.id)}
-                      className={copied === otp.id ? 'btn-success btn-sm' : 'btn-secondary btn-sm'}
-                      style={{ gap: 5 }}>
-                      <i className={`bi ${copied === otp.id ? 'bi-clipboard-check-fill' : 'bi-clipboard-fill'}`} style={{ fontSize: 12 }} />
-                      {copied === otp.id ? 'Copied!' : 'Copy'}
-                    </button>
+                  {isNew&&(
+                    <span style={{
+                      fontSize:9,fontWeight:800,padding:'2px 8px',borderRadius:10,
+                      background:G.yellowDim,color:G.yellow,border:`1px solid ${G.yellow}40`,
+                      textTransform:'uppercase',letterSpacing:'0.05em',animation:'newBadge 1s infinite',
+                    }}>NEW</span>
+                  )}
+                </div>
+
+                {/* OTP Code */}
+                <div style={{
+                  background:`linear-gradient(135deg,${G.yellowDim},rgba(245,158,11,0.03))`,
+                  border:`1px solid ${G.yellow}30`,borderRadius:12,
+                  padding:'16px',textAlign:'center',marginBottom:14,
+                  position:'relative',overflow:'hidden',
+                }}>
+                  <div style={{fontSize:10,fontWeight:700,color:G.yellow,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:6}}>OTP Code</div>
+                  <div style={{fontSize:34,fontWeight:900,color:G.yellow,letterSpacing:'0.25em',fontFamily:'monospace',
+                    ...(isNew?{textShadow:`0 0 20px ${G.yellow}60`}:{}),
+                  }}>{otp.otp}</div>
+                  <div style={{position:'absolute',bottom:-8,right:-8,width:60,height:60,borderRadius:'50%',background:`radial-gradient(circle,${G.yellowDim} 0%,transparent 70%)`,pointerEvents:'none'}}/>
+                </div>
+
+                {/* Message */}
+                <div style={{fontSize:12,color:G.text2,lineHeight:1.6,marginBottom:12,background:G.card2,borderRadius:8,padding:'10px 12px',border:`1px solid ${G.border}`}}>
+                  {(otp.body||'').slice(0,120)}{(otp.body||'').length>120?'…':''}
+                </div>
+
+                {/* Footer */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <div style={{fontSize:11,color:G.text3}}>
+                    {isNew?<span style={{color:G.green,fontWeight:700}}>{age}m ago</span>:(otp.received_at?new Date(otp.received_at).toLocaleString():'')}
                   </div>
-                  <div style={{ fontSize: 11, color: 'var(--text2)', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 5 }}>
-                    <i className="bi bi-person-fill" style={{ fontSize: 10, color: 'var(--text3)' }} />{otp.sender}
-                  </div>
-                  <p style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.5 }}>
-                    {(otp.body || '').slice(0, 100)}{(otp.body || '').length > 100 ? '…' : ''}
-                  </p>
+                  <button onClick={()=>copyText(otp.otp,otp.id)} style={{
+                    padding:'7px 16px',borderRadius:9,cursor:'pointer',
+                    background:copied===otp.id?G.greenDim:G.yellowDim,
+                    border:`1px solid ${copied===otp.id?G.green:G.yellow}40`,
+                    color:copied===otp.id?G.green:G.yellow,
+                    fontSize:12,fontWeight:700,transition:'all .2s',
+                    display:'flex',alignItems:'center',gap:6,
+                  }}>
+                    <i className={`bi ${copied===otp.id?'bi-check-circle-fill':'bi-clipboard-fill'}`}/>
+                    {copied===otp.id?'Copied!':'Copy OTP'}
+                  </button>
                 </div>
               </div>
             )
           })}
-        </div>
-      )}
-
-      {/* ── Guide box ── */}
-      {!watching && (
-        <div className="alert alert-info">
-          <i className="bi bi-lightbulb-fill" />
-          <div>
-            <strong>Live Watch Mode:</strong> Click <strong>Start Live Watch</strong> to poll every 3 seconds for new OTPs.
-            Enable <strong>Alert</strong> for an audio beep when a new code arrives.
-            OTPs are auto-extracted from SMS using pattern recognition across 20+ services.
-          </div>
         </div>
       )}
     </div>

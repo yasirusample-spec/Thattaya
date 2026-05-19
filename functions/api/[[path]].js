@@ -722,8 +722,26 @@ export async function onRequest(context) {
     // iVASMS INJECT — POST /api/ivasms/inject (re-seed fresh data)
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/ivasms/inject' && method === 'POST') {
-      // Force re-inject seed data even if numbers exist
+      const body = await request.json().catch(() => ({}))
+      const append = body.append === true  // if true, add to existing instead of replace
+
       const nums = generateSeedNumbers(user.id)
+      if (append) {
+        const existing = await kvGet(kv, `numbers_${user.id}`, [])
+        const existingArr = Array.isArray(existing) ? existing : []
+        const existingPhones = new Set(existingArr.map(n => n.phone))
+        const newNums = nums.filter(n => !existingPhones.has(n.phone))
+        const combined = [...existingArr, ...newNums]
+        await kvSet(kv, `numbers_${user.id}`, combined)
+        const smsData = generateSeedSMS(newNums, user.id)
+        const existingSms = await kvGet(kv, `sms_${user.id}`, [])
+        const combinedSms = [...(Array.isArray(existingSms) ? existingSms : []), ...smsData]
+        await kvSet(kv, `sms_${user.id}`, combinedSms)
+        await pushNotif(kv, user.id, 'sync', '📱 Numbers Added', `${newNums.length} new numbers added`)
+        return json({ ok: true, count: combined.length, smsCount: combinedSms.length, added: newNums.length, contacts: newNums.length })
+      }
+
+      // Full replace
       await kvSet(kv, `numbers_${user.id}`, nums)
       const smsData = generateSeedSMS(nums, user.id)
       await kvSet(kv, `sms_${user.id}`, smsData)
@@ -739,8 +757,62 @@ export async function onRequest(context) {
         }
       })
       await kvSet(kv, `wa_contacts_${user.id}`, contacts)
-      await pushNotif(kv, user.id, 'sync', '📱 Numbers Loaded', `${nums.length} numbers loaded from iVASMS account`)
-      return json({ ok: true, numbers: nums.length, sms: smsData.length, contacts: contacts.length })
+      await pushNotif(kv, user.id, 'sync', '📱 Numbers Loaded', `${nums.length} numbers loaded with ${smsData.length} SMS messages`)
+      return json({ ok: true, count: nums.length, smsCount: smsData.length, contacts: contacts.length })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // iVASMS COOKIE IMPORT — POST /api/ivasms/import-cookies
+    // User pastes cookies from real browser to bypass CF
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/ivasms/import-cookies' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const rawCookies = String(body.cookies || '').trim()
+      if (!rawCookies) return json({ error: 'cookies field required' }, 400)
+
+      // Store the cookies for use in sync
+      const usersAll = await kvGet(kv, 'users', [])
+      const usersArr = Array.isArray(usersAll) ? usersAll : []
+      const idx = usersArr.findIndex(u => u.id === user.id)
+      if (idx !== -1) {
+        usersArr[idx].ivasms_cookies = rawCookies
+        usersArr[idx].ivasms_cookies_saved_at = new Date().toISOString()
+        await kvSet(kv, 'users', usersArr)
+      }
+
+      // Try to use the cookies immediately to scrape
+      try {
+        const BASE = 'https://www.ivasms.com'
+        const testHdrs = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Cookie': rawCookies,
+          'Accept': 'text/html,application/xhtml+xml,*/*',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Sec-Fetch-Mode': 'navigate',
+          'Sec-Fetch-Site': 'none',
+          'Sec-Fetch-Dest': 'document',
+        }
+        const testR = await fetch(`${BASE}/portal/numbers`, { headers: testHdrs, redirect: 'follow', signal: AbortSignal.timeout(15000) })
+        const testHtml = await testR.text()
+
+        if (testHtml.includes('cf-chl') || testHtml.includes('Just a moment')) {
+          return json({ ok: false, saved: true, error: 'Cookies saved but CF challenge still active — try fresh cookies including cf_clearance', cookiesSaved: true })
+        }
+        if (testHtml.includes('/login') || testR.url?.includes('/login')) {
+          return json({ ok: false, saved: true, error: 'Cookies saved but session expired — please login to ivasms.com again and re-copy fresh cookies', cookiesSaved: true })
+        }
+
+        // Parse and save real numbers
+        const numbers = parseNumbers(testHtml, user.id)
+        if (numbers.length > 0) {
+          await kvSet(kv, `numbers_${user.id}`, numbers)
+          await pushNotif(kv, user.id, 'sync', '✅ Real Numbers Imported', `${numbers.length} real numbers from iVASMS`)
+          return json({ ok: true, count: numbers.length, real: true, message: `Successfully imported ${numbers.length} real numbers from iVASMS!` })
+        }
+        return json({ ok: true, saved: true, message: 'Cookies verified but no numbers found on portal page' })
+      } catch (e) {
+        return json({ ok: false, saved: true, error: `Cookies saved. Scrape error: ${e?.message}`, cookiesSaved: true })
+      }
     }
 
     // ══════════════════════════════════════════════════════════════════

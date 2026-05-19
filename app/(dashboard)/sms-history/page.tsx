@@ -1,362 +1,327 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
 
-const SVC_COLORS: Record<string, string> = {
-  Google: '#4285f4', WhatsApp: '#25d366', Telegram: '#229ed9', Facebook: '#1877f2',
-  Instagram: '#e1306c', Twitter: '#1da1f2', Amazon: '#ff9900', Microsoft: '#00a4ef',
-  Apple: '#777', PayPal: '#003087', Netflix: '#e50914', TikTok: '#ff0050',
-  Discord: '#5865f2', LinkedIn: '#0a66c2', Binance: '#f3ba2f', Coinbase: '#0052ff',
-  Snapchat: '#fffc00', Uber: '#000', Shopify: '#96bf48', Unknown: '#6a6a8a',
+const G = {
+  bg:'#0a0a0f', card:'#111118', card2:'#16161f', card3:'#1a1a24',
+  border:'rgba(255,255,255,0.07)', border2:'rgba(255,255,255,0.12)',
+  text1:'#f0f0f8', text2:'#a0a0b8', text3:'#60607a',
+  accent:'#7c3aed', accentHover:'#8b5cf6', accentDim:'rgba(124,58,237,0.15)',
+  green:'#10b981', greenDim:'rgba(16,185,129,0.12)',
+  red:'#ef4444', redDim:'rgba(239,68,68,0.1)',
+  yellow:'#f59e0b', yellowDim:'rgba(245,158,11,0.1)',
+  blue:'#3b82f6', blueDim:'rgba(59,130,246,0.1)',
+  pink:'#ec4899',
+}
+const SVC_COLORS: Record<string,string> = {
+  Google:'#4285f4',WhatsApp:'#25d366',Telegram:'#229ed9',Facebook:'#1877f2',
+  Amazon:'#ff9900',Microsoft:'#00a4ef',Apple:'#a8a8a8',Twitter:'#1da1f2',
+  Netflix:'#e50914',TikTok:'#ff0050',Discord:'#5865f2',LinkedIn:'#0a66c2',
+  Binance:'#f3ba2f',PayPal:'#003087',Coinbase:'#0052ff',Instagram:'#e1306c',
+  Snapchat:'#fffc00',Uber:'#222',Airbnb:'#ff5a5f',Shopify:'#96bf48',
 }
 
-const SERVICES = ['Google','WhatsApp','Telegram','Facebook','Instagram','Amazon','Microsoft','Apple','Twitter','TikTok','Discord','Netflix','Binance','PayPal','LinkedIn','Snapchat']
-
-export default function SMSHistoryPage() {
-  const [messages,   setMessages]   = useState<any[]>([])
+export default function SmsHistoryPage() {
+  const [msgs,       setMsgs]       = useState<any[]>([])
   const [total,      setTotal]      = useState(0)
   const [page,       setPage]       = useState(1)
   const [pages,      setPages]      = useState(1)
   const [loading,    setLoading]    = useState(true)
   const [search,     setSearch]     = useState('')
-  const [hasOtp,     setHasOtp]     = useState(false)
-  const [service,    setService]    = useState('')
-  const [numberId,   setNumberId]   = useState('')
-  const [numbers,    setNumbers]    = useState<any[]>([])
-  const [live,       setLive]       = useState(true)
-  const [copied,     setCopied]     = useState<string|null>(null)
+  const [serviceF,   setServiceF]   = useState('')
+  const [otpOnly,    setOtpOnly]    = useState(false)
+  const [sortDir,    setSortDir]    = useState<'asc'|'desc'>('desc')
+  const [live,       setLive]       = useState(false)
   const [selected,   setSelected]   = useState<Set<string>>(new Set())
-  const [deleting,   setDeleting]   = useState(false)
-  const [newIds,     setNewIds]     = useState<Set<string>>(new Set())
-  const [expandedId, setExpandedId] = useState<string|null>(null)
-  const prevTotal = useRef(0)
+  const [expanded,   setExpanded]   = useState<string|null>(null)
+  const [msg,        setMsg]        = useState<{ok:boolean,text:string}|null>(null)
+  const [services,   setServices]   = useState<string[]>([])
+  const [copied,     setCopied]     = useState<string|null>(null)
+  const liveRef = useRef<any>(null)
+  const limit = 50
 
-  const fetchMsgs = useCallback(async (isLive = false) => {
-    if (!isLive) setLoading(true)
+  const showMsg=(ok:boolean,text:string,ms=5000)=>{setMsg({ok,text});setTimeout(()=>setMsg(null),ms)}
+
+  const load=useCallback(async(quiet=false)=>{
+    if(!quiet) setLoading(true)
     try {
-      const params = new URLSearchParams({
-        page: String(page), limit: '30',
-        ...(search   && { search }),
-        ...(hasOtp   && { hasOtp: 'true' }),
-        ...(service  && { service }),
-        ...(numberId && { numberId }),
+      const params=new URLSearchParams({
+        page:String(page), limit:String(limit),
+        ...(search?{search}:{}),
+        ...(serviceF?{service:serviceF}:{}),
+        ...(otpOnly?{hasOtp:'true'}:{}),
       })
-      const r = await fetch(`/api/ivasms/sms?${params}`)
-      if (r.ok) {
-        const d = await r.json()
-        const msgs = d.messages || []
-        if (isLive && prevTotal.current > 0 && d.total > prevTotal.current) {
-          const prevIds = new Set(messages.map((m: any) => m.id))
-          const incoming = msgs.filter((m: any) => !prevIds.has(m.id))
-          if (incoming.length > 0) {
-            setNewIds(new Set(incoming.map((m: any) => m.id)))
-            setTimeout(() => setNewIds(new Set()), 4000)
-          }
-        }
-        prevTotal.current = d.total || 0
-        setMessages(msgs)
-        setTotal(d.total || 0)
-        setPages(d.pages || 1)
+      const r=await fetch(`/api/ivasms/sms?${params}`)
+      if(r.ok){
+        const d=await r.json()
+        const arr=d.messages||[]
+        if(sortDir==='asc') arr.reverse()
+        setMsgs(arr)
+        setTotal(d.total||0)
+        setPages(d.pages||1)
+        const svcs=[...new Set(arr.map((m:any)=>m.service).filter(Boolean))] as string[]
+        setServices(p=>[...new Set([...p,...svcs])])
       }
-    } catch {}
-    if (!isLive) setLoading(false)
-  }, [page, search, hasOtp, service, numberId, messages])
+    } catch{}
+    setLoading(false)
+  },[page,search,serviceF,otpOnly,sortDir])
 
-  useEffect(() => { setPage(1) }, [search, hasOtp, service, numberId])
-  useEffect(() => { fetchMsgs() }, [page, search, hasOtp, service, numberId])
+  useEffect(()=>{load()},[load])
+  useEffect(()=>{
+    if(live) liveRef.current=setInterval(()=>load(true),5000)
+    else clearInterval(liveRef.current)
+    return()=>clearInterval(liveRef.current)
+  },[live,load])
 
-  useEffect(() => {
-    fetch('/api/ivasms/numbers').then(r => r.json()).then(d => setNumbers(d.numbers || [])).catch(() => {})
-  }, [])
-
-  useEffect(() => {
-    if (!live) return
-    const t = setInterval(() => fetchMsgs(true), 5000)
-    return () => clearInterval(t)
-  }, [live, fetchMsgs])
-
-  const copyOtp = (otp: string) => {
-    navigator.clipboard.writeText(otp).catch(() => {})
-    setCopied(otp)
-    setTimeout(() => setCopied(null), 2500)
+  const deleteMsg=async(id:string)=>{
+    await fetch('/api/ivasms/sms',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id})})
+    setMsgs(p=>p.filter(m=>m.id!==id)); setTotal(t=>t-1)
   }
 
-  const toggleSelect = (id: string) => {
-    setSelected(p => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n })
+  const bulkDelete=async()=>{
+    if(!selected.size||!confirm(`Delete ${selected.size} messages?`)) return
+    await fetch('/api/ivasms/sms',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...selected]})})
+    setSelected(new Set()); await load()
+    showMsg(true,`Deleted ${selected.size} messages`)
   }
 
-  const bulkDelete = async () => {
-    if (selected.size === 0) return
-    if (!confirm(`Delete ${selected.size} message${selected.size > 1 ? 's' : ''}?`)) return
-    setDeleting(true)
-    try {
-      await fetch('/api/ivasms/sms', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ ids: [...selected] }) })
-      setMessages(p => p.filter(m => !selected.has(m.id)))
-      setTotal(p => p - selected.size)
-      setSelected(new Set())
-    } catch {}
-    setDeleting(false)
-  }
+  const copyText=(text:string,key:string)=>{navigator.clipboard.writeText(text).catch(()=>{});setCopied(key);setTimeout(()=>setCopied(null),2000)}
 
-  const exportCSV = () => {
-    const header = 'Phone,Sender,Service,OTP,Body,Time'
-    const rows = messages.map(m => `"${m.phone_number}","${m.sender}","${m.service}","${m.otp||''}","${(m.body||'').replace(/"/g,'""')}","${m.received_at}"`)
-    const blob = new Blob([header + '\n' + rows.join('\n')], { type: 'text/csv' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a'); a.href = url; a.download = `dl-sms-${Date.now()}.csv`
-    a.click(); URL.revokeObjectURL(url)
-  }
-
-  const fmtTime = (t: string) => {
-    try {
-      const d = new Date(t), diff = (Date.now() - d.getTime()) / 1000
-      if (diff < 60)    return `${Math.floor(diff)}s ago`
-      if (diff < 3600)  return `${Math.floor(diff/60)}m ago`
-      if (diff < 86400) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      return d.toLocaleDateString()
-    } catch { return t }
-  }
-
-  const otpCount  = messages.filter(m => m.otp).length
-  const svcCounts = messages.reduce((a: any, m) => { if (m.service && m.service !== 'Unknown') a[m.service] = (a[m.service]||0) + 1; return a }, {})
-  const topSvc    = Object.entries(svcCounts).sort((a: any, b: any) => b[1] - a[1]).slice(0, 5)
+  const otps    = msgs.filter(m=>m.otp)
+  const newOtps = msgs.filter(m=>m.otp&&Date.now()-new Date(m.received_at).getTime()<300000)
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+    <div style={{maxWidth:1400,margin:'0 auto'}}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+        .row-hover:hover{background:rgba(124,58,237,0.04)!important}
+      `}</style>
 
-      {/* ── Header ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:24,flexWrap:'wrap',gap:12}}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <i className="bi bi-chat-dots-fill" style={{ color: 'var(--accent)', fontSize: 20 }} />
+          <h1 style={{margin:0,fontSize:24,fontWeight:800,color:G.text1,letterSpacing:'-0.5px',display:'flex',alignItems:'center',gap:10}}>
+            <i className="bi bi-chat-dots-fill" style={{color:G.blue,fontSize:20}}/>
             SMS History
-          </h2>
-          <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 4 }}>
-            {total.toLocaleString()} messages · {live ? 'Live 5s' : 'Paused'}
-          </p>
+          </h1>
+          <p style={{margin:'4px 0 0',fontSize:12,color:G.text3}}>{total} messages total</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          {selected.size > 0 && (
-            <button onClick={bulkDelete} disabled={deleting} className="btn-ghost btn-sm" style={{ color: 'var(--accent)', borderColor: 'var(--accent)' }}>
-              <i className="bi bi-trash-fill" style={{ fontSize: 13 }} />
-              {deleting ? 'Deleting…' : `Delete ${selected.size}`}
+        <div style={{display:'flex',gap:8,flexWrap:'wrap',alignItems:'center'}}>
+          <button onClick={()=>setLive(l=>!l)} style={{
+            display:'flex',alignItems:'center',gap:6,padding:'9px 14px',borderRadius:9,fontSize:12,fontWeight:700,
+            background:live?G.greenDim:G.card2, border:`1px solid ${live?G.green:G.border2}`,
+            color:live?G.green:G.text2, cursor:'pointer', transition:'all .2s',
+          }}>
+            <div style={{width:6,height:6,borderRadius:'50%',background:live?G.green:G.text3,animation:live?'pulse 1s infinite':'none'}}/>
+            {live?'Live ON':'Live 5s'}
+          </button>
+          <button onClick={()=>setSortDir(d=>d==='desc'?'asc':'desc')} style={{
+            display:'flex',alignItems:'center',gap:6,padding:'9px 14px',borderRadius:9,
+            background:G.card2,border:`1px solid ${G.border2}`,color:G.text2,fontSize:12,fontWeight:600,cursor:'pointer',
+          }}>
+            <i className={`bi bi-sort-${sortDir==='desc'?'down':'up'}`}/>
+            {sortDir==='desc'?'Newest':'Oldest'}
+          </button>
+          {selected.size>0&&(
+            <button onClick={bulkDelete} style={{
+              display:'flex',alignItems:'center',gap:6,padding:'9px 14px',borderRadius:9,
+              background:G.redDim,border:`1px solid rgba(239,68,68,0.3)`,
+              color:G.red,fontSize:12,fontWeight:700,cursor:'pointer',
+            }}>
+              <i className="bi bi-trash3-fill"/>Delete {selected.size}
             </button>
           )}
-          <button onClick={() => setLive(p => !p)} className={live ? 'btn-success btn-sm' : 'btn-secondary btn-sm'} style={{ gap: 6 }}>
-            {live ? <><span className="live-dot" />Live ON</> : <><i className="bi bi-record-circle" style={{ fontSize: 13 }} />Live OFF</>}
-          </button>
-          <button onClick={exportCSV} className="btn-secondary btn-sm" style={{ gap: 6 }}>
-            <i className="bi bi-download" style={{ fontSize: 13 }} />Export CSV
-          </button>
         </div>
       </div>
 
-      {/* ── Quick stats row ── */}
-      {messages.length > 0 && (
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <div className="card card-sm" style={{ display: 'flex', alignItems: 'center', gap: 10, flex: '0 0 auto' }}>
-            <i className="bi bi-chat-dots-fill" style={{ color: 'var(--accent)', fontSize: 16 }} />
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 900, color: 'var(--accent)', lineHeight: 1 }}>{total.toLocaleString()}</div>
-              <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase' }}>Total SMS</div>
-            </div>
-          </div>
-          <div className="card card-sm" style={{ display: 'flex', alignItems: 'center', gap: 10, flex: '0 0 auto' }}>
-            <i className="bi bi-key-fill" style={{ color: 'var(--orange)', fontSize: 16 }} />
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 900, color: 'var(--orange)', lineHeight: 1 }}>{otpCount}</div>
-              <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase' }}>With OTP</div>
-            </div>
-          </div>
-          {topSvc.map(([svc, cnt]: any) => (
-            <div key={svc} className="card card-sm" style={{ display: 'flex', alignItems: 'center', gap: 8, flex: '0 0 auto', cursor: 'pointer' }}
-              onClick={() => setService(service === svc ? '' : svc)}>
-              <span style={{ width: 8, height: 8, borderRadius: 2, background: SVC_COLORS[svc] || 'var(--text3)', display: 'inline-block', flexShrink: 0 }} />
-              <div>
-                <div style={{ fontSize: 14, fontWeight: 800, color: SVC_COLORS[svc] || 'var(--text)', lineHeight: 1 }}>{cnt}</div>
-                <div style={{ fontSize: 10, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase' }}>{svc}</div>
-              </div>
-              {service === svc && <i className="bi bi-x-circle-fill" style={{ color: 'var(--accent)', fontSize: 12 }} />}
-            </div>
-          ))}
-        </div>
-      )}
+      {msg&&<div style={{padding:'11px 16px',borderRadius:10,marginBottom:18,fontSize:13,fontWeight:600,animation:'slideIn .2s ease',background:msg.ok?G.greenDim:G.redDim,color:msg.ok?G.green:G.red,border:`1px solid ${msg.ok?'rgba(16,185,129,0.3)':'rgba(239,68,68,0.3)'}`}}>{msg.text}</div>}
 
-      {/* ── Filters ── */}
-      <div className="card card-sm" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-        <div className="input-group" style={{ flex: '1 1 200px' }}>
-          <i className="bi bi-search input-icon" />
-          <input placeholder="Search body, sender, number…" value={search} onChange={e => setSearch(e.target.value)} />
-        </div>
-        <select value={service} onChange={e => setService(e.target.value)} style={{ flex: '0 0 160px', width: 'auto' }}>
-          <option value="">All Services</option>
-          {SERVICES.map(s => <option key={s}>{s}</option>)}
-        </select>
-        <select value={numberId} onChange={e => setNumberId(e.target.value)} style={{ flex: '0 0 180px', width: 'auto' }}>
-          <option value="">All Numbers</option>
-          {numbers.map(n => <option key={n.id} value={n.id}>{n.phone}</option>)}
-        </select>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: 13, color: 'var(--text2)', userSelect: 'none' }}>
-          <input type="checkbox" checked={hasOtp} onChange={e => setHasOtp(e.target.checked)}
-            style={{ width: 'auto', accentColor: 'var(--accent)', cursor: 'pointer' }} />
-          <i className="bi bi-key-fill" style={{ color: 'var(--orange)' }} /> OTP only
-        </label>
-        {(search || service || numberId || hasOtp) && (
-          <button className="btn-ghost btn-xs" onClick={() => { setSearch(''); setService(''); setNumberId(''); setHasOtp(false) }}>
-            <i className="bi bi-x" style={{ fontSize: 14 }} />Clear all
+      {/* Stats */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(140px,1fr))',gap:12,marginBottom:20}}>
+        {[
+          {label:'Total SMS',  value:total,          color:G.blue,   icon:'bi-chat-dots-fill'},
+          {label:'OTPs',       value:otps.length,    color:G.yellow, icon:'bi-key-fill'},
+          {label:'New OTPs',   value:newOtps.length, color:G.green,  icon:'bi-lightning-fill'},
+          {label:'Services',   value:services.length,color:G.accent, icon:'bi-grid-fill'},
+        ].map(s=>(
+          <div key={s.label} style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:12,padding:'14px 16px'}}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+              <i className={`bi ${s.icon}`} style={{fontSize:11,color:s.color}}/>
+              <span style={{fontSize:10,fontWeight:700,color:G.text3,textTransform:'uppercase',letterSpacing:'0.06em'}}>{s.label}</span>
+            </div>
+            <span style={{fontSize:24,fontWeight:800,color:G.text1}}>{s.value}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Filters */}
+      <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:12,padding:'14px 16px',marginBottom:16}}>
+        <div style={{display:'flex',gap:10,flexWrap:'wrap',alignItems:'center'}}>
+          <div style={{position:'relative',flex:1,minWidth:200}}>
+            <i className="bi bi-search" style={{position:'absolute',left:12,top:'50%',transform:'translateY(-50%)',color:G.text3,fontSize:13}}/>
+            <input value={search} onChange={e=>{setSearch(e.target.value);setPage(1)}} placeholder="Search messages, senders…"
+              style={{width:'100%',padding:'9px 12px 9px 36px',borderRadius:9,background:G.card2,border:`1px solid ${G.border2}`,color:G.text1,fontSize:13,outline:'none',boxSizing:'border-box'}}/>
+          </div>
+          <button onClick={()=>{setOtpOnly(v=>!v);setPage(1)}} style={{
+            display:'flex',alignItems:'center',gap:6,padding:'9px 14px',borderRadius:9,fontSize:12,fontWeight:700,cursor:'pointer',transition:'all .2s',
+            background:otpOnly?G.yellowDim:G.card2, border:`1px solid ${otpOnly?G.yellow:G.border2}`,
+            color:otpOnly?G.yellow:G.text2,
+          }}>
+            <i className="bi bi-key-fill"/>OTP Only
           </button>
-        )}
-        {selected.size > 0 && (
-          <span style={{ fontSize: 12, color: 'var(--accent)', fontWeight: 600, marginLeft: 'auto' }}>
-            {selected.size} selected
-          </span>
+        </div>
+        {/* Service chips */}
+        {services.length>0&&(
+          <div style={{display:'flex',gap:6,flexWrap:'wrap',marginTop:10}}>
+            <button onClick={()=>{setServiceF('');setPage(1)}} style={{
+              padding:'3px 12px',borderRadius:20,fontSize:11,fontWeight:700,cursor:'pointer',
+              background:!serviceF?G.accentDim:G.card2,border:`1px solid ${!serviceF?G.accent:G.border}`,
+              color:!serviceF?G.accentHover:G.text3,
+            }}>All</button>
+            {services.slice(0,15).map(svc=>(
+              <button key={svc} onClick={()=>{setServiceF(serviceF===svc?'':svc);setPage(1)}} style={{
+                padding:'3px 12px',borderRadius:20,fontSize:11,fontWeight:700,cursor:'pointer',
+                background:serviceF===svc?`${SVC_COLORS[svc]||G.accent}20`:G.card2,
+                border:`1px solid ${serviceF===svc?(SVC_COLORS[svc]||G.accent):G.border}`,
+                color:serviceF===svc?(SVC_COLORS[svc]||G.accentHover):G.text3,
+              }}>{svc}</button>
+            ))}
+          </div>
         )}
       </div>
 
-      {/* ── Messages list ── */}
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            {messages.length > 0 && (
-              <input type="checkbox" style={{ width: 'auto', accentColor: 'var(--accent)', cursor: 'pointer' }}
-                checked={selected.size === messages.length && messages.length > 0}
-                onChange={e => setSelected(e.target.checked ? new Set(messages.map(m => m.id)) : new Set())} />
-            )}
-            <i className="bi bi-chat-dots-fill" style={{ color: 'var(--accent)', fontSize: 15 }} />
-            <span style={{ fontWeight: 700, fontSize: 14 }}>Messages</span>
-            <span className="badge badge-gray" style={{ fontSize: 11 }}>{total.toLocaleString()}</span>
-          </div>
-          {live && <span className="live-badge"><span className="live-dot" />LIVE</span>}
+      {/* Table */}
+      {loading?(
+        <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:200,flexDirection:'column',gap:14}}>
+          <div style={{width:36,height:36,borderRadius:'50%',border:`3px solid ${G.accentDim}`,borderTop:`3px solid ${G.accent}`,animation:'spin .8s linear infinite'}}/>
+          <p style={{color:G.text3,fontSize:13}}>Loading messages…</p>
         </div>
-
-        {loading ? (
-          <div style={{ padding: 40, textAlign: 'center' }}>
-            <i className="bi bi-arrow-repeat animate-spin" style={{ fontSize: 30, color: 'var(--accent)', display: 'block', marginBottom: 12 }} />
-            <p style={{ color: 'var(--text3)', fontSize: 13 }}>Loading…</p>
-          </div>
-        ) : messages.length === 0 ? (
-          <div style={{ padding: 48, textAlign: 'center', color: 'var(--text3)' }}>
-            <i className="bi bi-chat-dots-fill" style={{ fontSize: 44, display: 'block', marginBottom: 16, opacity: .15 }} />
-            <p style={{ fontSize: 15, fontWeight: 600, color: 'var(--text2)', marginBottom: 6 }}>No messages found</p>
-            <p style={{ fontSize: 13 }}>{total === 0 ? 'Go to Numbers and click Load Numbers to get started.' : 'Try adjusting your filters.'}</p>
-            {total === 0 && (
-              <a href="/numbers" className="btn-primary btn-sm" style={{ marginTop: 16, display: 'inline-flex', gap: 6 }}>
-                <i className="bi bi-phone-fill" style={{ fontSize: 13 }} />Go to Numbers
-              </a>
-            )}
-          </div>
-        ) : (
-          <div style={{ overflowX: 'auto' }}>
-            <table>
-              <thead>
-                <tr>
-                  <th style={{ width: 36 }}></th>
-                  <th><i className="bi bi-phone-fill" style={{ marginRight: 5 }} />Number</th>
-                  <th><i className="bi bi-person-fill" style={{ marginRight: 5 }} />Sender</th>
-                  <th><i className="bi bi-app-indicator" style={{ marginRight: 5 }} />Service</th>
-                  <th style={{ minWidth: 260 }}><i className="bi bi-chat-fill" style={{ marginRight: 5 }} />Message</th>
-                  <th><i className="bi bi-key-fill" style={{ marginRight: 5, color: 'var(--orange)' }} />OTP</th>
-                  <th><i className="bi bi-clock-fill" style={{ marginRight: 5 }} />Time</th>
-                </tr>
-              </thead>
-              <tbody>
-                {messages.map((m: any) => (
-                  <>
-                    <tr key={m.id} className={newIds.has(m.id) ? 'new-sms' : ''} style={{ cursor: 'pointer' }}
-                      onClick={() => setExpandedId(expandedId === m.id ? null : m.id)}>
-                      <td onClick={e => e.stopPropagation()}>
-                        <input type="checkbox" style={{ width: 'auto', accentColor: 'var(--accent)', cursor: 'pointer' }}
-                          checked={selected.has(m.id)} onChange={() => toggleSelect(m.id)} />
-                      </td>
-                      <td style={{ fontFamily: 'monospace', fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>
-                        {m.phone_number}
-                      </td>
-                      <td style={{ fontSize: 12, color: 'var(--text2)' }}>{m.sender || '—'}</td>
-                      <td>
-                        {m.service && m.service !== 'Unknown' ? (
-                          <span style={{ fontSize: 10, fontWeight: 700, color: SVC_COLORS[m.service] || 'var(--text2)',
-                            background: `${SVC_COLORS[m.service]||'#666'}18`, border: `1px solid ${SVC_COLORS[m.service]||'#666'}30`,
-                            padding: '2px 7px', borderRadius: 4 }}>
-                            {m.service}
-                          </span>
-                        ) : <span style={{ color: 'var(--text3)', fontSize: 12 }}>—</span>}
-                      </td>
-                      <td style={{ fontSize: 12, color: 'var(--text2)', maxWidth: 300 }}>
-                        <span style={{ display: '-webkit-box', WebkitLineClamp: 1, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                          {m.body}
-                        </span>
-                      </td>
-                      <td>
-                        {m.otp ? (
-                          <button onClick={e => { e.stopPropagation(); copyOtp(m.otp) }}
-                            style={{ background: 'rgba(229,9,20,.1)', border: '1px solid rgba(229,9,20,.3)',
-                              color: 'var(--accent)', fontWeight: 900, fontSize: 14, padding: '3px 10px',
-                              borderRadius: 7, cursor: 'pointer', fontFamily: 'monospace', letterSpacing: 3,
-                              display: 'flex', alignItems: 'center', gap: 5 }}
-                            title="Copy OTP">
-                            {m.otp}
-                            <i className={`bi ${copied === m.otp ? 'bi-clipboard-check-fill' : 'bi-clipboard-fill'}`} style={{ fontSize: 10 }} />
-                          </button>
-                        ) : <span style={{ color: 'var(--text3)', fontSize: 12 }}>—</span>}
-                      </td>
-                      <td style={{ fontSize: 11, color: 'var(--text3)', whiteSpace: 'nowrap' }}>
-                        <i className="bi bi-clock-fill" style={{ marginRight: 4 }} />{fmtTime(m.received_at)}
-                      </td>
-                    </tr>
-                    {expandedId === m.id && (
-                      <tr key={`exp-${m.id}`}>
-                        <td colSpan={7} style={{ padding: 0, background: 'var(--bg)' }}>
-                          <div style={{ padding: '14px 20px', borderTop: '2px solid var(--accent)' }}>
-                            <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                              <div style={{ flex: 1 }}>
-                                <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, marginBottom: 6 }}>Full Message</div>
-                                <p style={{ fontSize: 13, color: 'var(--text2)', lineHeight: 1.7, background: 'var(--bg2)', padding: '10px 14px', borderRadius: 8 }}>{m.body}</p>
-                              </div>
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 200 }}>
-                                {m.otp && (
-                                  <div>
-                                    <div style={{ fontSize: 11, color: 'var(--text3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: .5, marginBottom: 6 }}>OTP Code</div>
-                                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                      <div style={{ fontFamily: 'monospace', fontWeight: 900, fontSize: 28, letterSpacing: 6, color: 'var(--accent)',
-                                        background: 'rgba(229,9,20,.08)', border: '1px solid rgba(229,9,20,.3)', padding: '6px 16px', borderRadius: 10 }}>
-                                        {m.otp}
-                                      </div>
-                                      <button onClick={() => copyOtp(m.otp)} className={copied === m.otp ? 'btn-success btn-sm' : 'btn-primary btn-sm'}>
-                                        <i className={`bi ${copied === m.otp ? 'bi-clipboard-check-fill' : 'bi-clipboard-fill'}`} style={{ fontSize: 13 }} />
-                                        {copied === m.otp ? 'Copied!' : 'Copy'}
-                                      </button>
-                                    </div>
-                                  </div>
-                                )}
-                                <div style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', flexDirection: 'column', gap: 4 }}>
-                                  <div><strong>From:</strong> {m.sender}</div>
-                                  <div><strong>To:</strong> {m.phone_number}</div>
-                                  <div><strong>Service:</strong> {m.service || 'Unknown'}</div>
-                                  <div><strong>Time:</strong> {new Date(m.received_at).toLocaleString()}</div>
-                                </div>
+      ):msgs.length===0?(
+        <div style={{background:G.card,border:`1px dashed ${G.border2}`,borderRadius:14,padding:'60px 40px',textAlign:'center'}}>
+          <i className="bi bi-chat-dots" style={{fontSize:48,color:G.text3,display:'block',marginBottom:16}}/>
+          <h3 style={{margin:'0 0 8px',color:G.text1,fontSize:17,fontWeight:700}}>No Messages Found</h3>
+          <p style={{color:G.text2,fontSize:13}}>Load numbers first or adjust your filters.</p>
+        </div>
+      ):(
+        <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:14,overflow:'hidden'}}>
+          <table style={{width:'100%',borderCollapse:'collapse'}}>
+            <thead>
+              <tr style={{background:G.card2}}>
+                <th style={{padding:'12px 16px',width:40}}>
+                  <input type="checkbox" checked={selected.size===msgs.length&&msgs.length>0}
+                    onChange={e=>setSelected(e.target.checked?new Set(msgs.map((m:any)=>m.id)):new Set())}
+                    style={{accentColor:G.accent,cursor:'pointer'}}/>
+                </th>
+                {['Service','From','Number','Message','Time',''].map(h=>(
+                  <th key={h} style={{padding:'12px 14px',textAlign:'left',fontSize:10,fontWeight:700,color:G.text3,textTransform:'uppercase',letterSpacing:'0.06em',whiteSpace:'nowrap'}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {msgs.map(m=>{
+                const isExp=expanded===m.id
+                const svcColor=SVC_COLORS[m.service]||G.text3
+                const isNew=Date.now()-new Date(m.received_at).getTime()<300000
+                const isSel=selected.has(m.id)
+                return [
+                  <tr key={m.id} className="row-hover" style={{
+                    borderTop:`1px solid ${G.border}`,cursor:'pointer',
+                    background:isSel?'rgba(124,58,237,0.06)':'transparent',
+                  }} onClick={()=>setExpanded(isExp?null:m.id)}>
+                    <td style={{padding:'12px 16px'}} onClick={e=>e.stopPropagation()}>
+                      <input type="checkbox" checked={isSel}
+                        onChange={e=>{setSelected(p=>{const n=new Set(p);e.target.checked?n.add(m.id):n.delete(m.id);return n})}}
+                        style={{accentColor:G.accent,cursor:'pointer'}}/>
+                    </td>
+                    <td style={{padding:'12px 14px'}}>
+                      <div style={{display:'flex',alignItems:'center',gap:8}}>
+                        <div style={{
+                          width:32,height:32,borderRadius:9,flexShrink:0,
+                          background:`${svcColor}20`,border:`1px solid ${svcColor}25`,
+                          display:'flex',alignItems:'center',justifyContent:'center',
+                          fontSize:10,fontWeight:800,color:svcColor,
+                        }}>{(m.service||'?').slice(0,2).toUpperCase()}</div>
+                        <div>
+                          <div style={{fontSize:12,fontWeight:700,color:G.text1,display:'flex',alignItems:'center',gap:5}}>
+                            {m.service||'Unknown'}
+                            {isNew&&<span style={{fontSize:8,fontWeight:800,padding:'1px 5px',borderRadius:10,background:G.accentDim,color:G.accentHover,border:`1px solid ${G.accent}40`}}>NEW</span>}
+                          </div>
+                          {m.otp&&<div style={{fontSize:11,fontWeight:800,color:G.yellow,letterSpacing:'0.1em'}}>{m.otp}</div>}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{padding:'12px 14px'}}><span style={{fontSize:12,color:G.text2}}>{m.sender||'—'}</span></td>
+                    <td style={{padding:'12px 14px'}}><span style={{fontSize:11,color:G.text3,fontFamily:'monospace'}}>{m.phone_number||'—'}</span></td>
+                    <td style={{padding:'12px 14px',maxWidth:300}}>
+                      <div style={{fontSize:12,color:G.text2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.body||''}</div>
+                    </td>
+                    <td style={{padding:'12px 14px',whiteSpace:'nowrap'}}>
+                      <span style={{fontSize:11,color:G.text3}}>{m.received_at?new Date(m.received_at).toLocaleString():''}</span>
+                    </td>
+                    <td style={{padding:'12px 14px'}}>
+                      <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                        {m.otp&&<button onClick={e=>{e.stopPropagation();copyText(m.otp,m.id+'-otp')}} style={{
+                          background:G.yellowDim,border:`1px solid ${G.yellow}40`,color:G.yellow,
+                          padding:'4px 10px',borderRadius:7,fontSize:11,fontWeight:700,cursor:'pointer',
+                        }}>{copied===m.id+'-otp'?'✓':'Copy OTP'}</button>}
+                        <button onClick={e=>{e.stopPropagation();deleteMsg(m.id)}} style={{background:'none',border:'none',cursor:'pointer',color:G.text3,fontSize:13,padding:2}}>
+                          <i className="bi bi-trash3"/>
+                        </button>
+                        <i className={`bi bi-chevron-${isExp?'up':'down'}`} style={{fontSize:12,color:G.text3}}/>
+                      </div>
+                    </td>
+                  </tr>,
+                  isExp&&(
+                    <tr key={`${m.id}-exp`}>
+                      <td colSpan={7} style={{padding:0}}>
+                        <div style={{background:G.card2,borderTop:`1px solid ${G.border}`,padding:'20px 24px',animation:'fadeIn .2s ease'}}>
+                          <div style={{display:'grid',gridTemplateColumns:'1fr auto',gap:20,alignItems:'start'}}>
+                            <div>
+                              <div style={{fontSize:10,fontWeight:700,color:G.text3,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:8}}>Full Message</div>
+                              <div style={{fontSize:14,color:G.text1,lineHeight:1.7,background:G.card,borderRadius:10,padding:'14px 16px',border:`1px solid ${G.border}`}}>{m.body||''}</div>
+                              <div style={{display:'flex',gap:16,marginTop:12,flexWrap:'wrap'}}>
+                                <div><span style={{fontSize:10,color:G.text3}}>SERVICE</span><br/><span style={{fontSize:13,fontWeight:700,color:svcColor}}>{m.service||'—'}</span></div>
+                                <div><span style={{fontSize:10,color:G.text3}}>FROM</span><br/><span style={{fontSize:13,fontWeight:700,color:G.text1}}>{m.sender||'—'}</span></div>
+                                <div><span style={{fontSize:10,color:G.text3}}>NUMBER</span><br/><span style={{fontSize:13,fontWeight:700,color:G.text1,fontFamily:'monospace'}}>{m.phone_number||'—'}</span></div>
+                                <div><span style={{fontSize:10,color:G.text3}}>RECEIVED</span><br/><span style={{fontSize:13,fontWeight:700,color:G.text1}}>{m.received_at?new Date(m.received_at).toLocaleString():''}</span></div>
                               </div>
                             </div>
+                            {m.otp&&(
+                              <div style={{
+                                background:`linear-gradient(135deg,${G.yellowDim},rgba(245,158,11,0.05))`,
+                                border:`2px solid ${G.yellow}50`,borderRadius:14,padding:'20px 24px',
+                                textAlign:'center',minWidth:160,
+                              }}>
+                                <div style={{fontSize:10,fontWeight:800,color:G.yellow,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:8}}>OTP Code</div>
+                                <div style={{fontSize:32,fontWeight:900,color:G.yellow,letterSpacing:'0.2em',fontFamily:'monospace'}}>{m.otp}</div>
+                                <button onClick={()=>copyText(m.otp,m.id+'-big')} style={{
+                                  marginTop:12,padding:'8px 20px',borderRadius:9,
+                                  background:G.yellow,border:'none',color:'#000',
+                                  fontSize:12,fontWeight:800,cursor:'pointer',width:'100%',
+                                }}>{copied===m.id+'-big'?'✓ Copied!':'Copy OTP'}</button>
+                              </div>
+                            )}
                           </div>
-                        </td>
-                      </tr>
-                    )}
-                  </>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                ].filter(Boolean)
+              })}
+            </tbody>
+          </table>
 
-      {/* ── Pagination ── */}
-      {pages > 1 && (
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-          <button className="btn-secondary btn-sm" disabled={page <= 1} onClick={() => setPage(1)}><i className="bi bi-chevron-double-left" /></button>
-          <button className="btn-secondary btn-sm" disabled={page <= 1} onClick={() => setPage(p => p-1)}><i className="bi bi-chevron-left" /></button>
-          <span style={{ fontSize: 13, color: 'var(--text2)', padding: '0 12px' }}>
-            Page <strong style={{ color: 'var(--text)' }}>{page}</strong> of {pages}
-          </span>
-          <button className="btn-secondary btn-sm" disabled={page >= pages} onClick={() => setPage(p => p+1)}><i className="bi bi-chevron-right" /></button>
-          <button className="btn-secondary btn-sm" disabled={page >= pages} onClick={() => setPage(pages)}><i className="bi bi-chevron-double-right" /></button>
+          {/* Pagination */}
+          {pages>1&&(
+            <div style={{display:'flex',alignItems:'center',justifyContent:'center',gap:8,padding:'16px',borderTop:`1px solid ${G.border}`}}>
+              <button onClick={()=>setPage(1)} disabled={page===1} style={{padding:'6px 10px',borderRadius:7,background:G.card2,border:`1px solid ${G.border}`,color:G.text2,cursor:page===1?'not-allowed':'pointer',opacity:page===1?0.5:1,fontSize:12}}>«</button>
+              <button onClick={()=>setPage(p=>Math.max(1,p-1))} disabled={page===1} style={{padding:'6px 10px',borderRadius:7,background:G.card2,border:`1px solid ${G.border}`,color:G.text2,cursor:page===1?'not-allowed':'pointer',opacity:page===1?0.5:1,fontSize:12}}>‹</button>
+              <span style={{fontSize:12,color:G.text2,padding:'0 8px'}}>Page {page} of {pages} · {total} total</span>
+              <button onClick={()=>setPage(p=>Math.min(pages,p+1))} disabled={page===pages} style={{padding:'6px 10px',borderRadius:7,background:G.card2,border:`1px solid ${G.border}`,color:G.text2,cursor:page===pages?'not-allowed':'pointer',opacity:page===pages?0.5:1,fontSize:12}}>›</button>
+              <button onClick={()=>setPage(pages)} disabled={page===pages} style={{padding:'6px 10px',borderRadius:7,background:G.card2,border:`1px solid ${G.border}`,color:G.text2,cursor:page===pages?'not-allowed':'pointer',opacity:page===pages?0.5:1,fontSize:12}}>»</button>
+            </div>
+          )}
         </div>
       )}
     </div>

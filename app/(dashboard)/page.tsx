@@ -1,450 +1,450 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 
-function CountryFlag({ country }: { country: string }) {
+const G = {
+  bg: '#0a0a0f',
+  card: '#111118',
+  card2: '#16161f',
+  border: 'rgba(255,255,255,0.07)',
+  border2: 'rgba(255,255,255,0.12)',
+  text1: '#f0f0f8',
+  text2: '#a0a0b8',
+  text3: '#60607a',
+  accent: '#7c3aed',
+  accentHover: '#8b5cf6',
+  accentDim: 'rgba(124,58,237,0.15)',
+  green: '#10b981',
+  greenDim: 'rgba(16,185,129,0.12)',
+  red: '#ef4444',
+  redDim: 'rgba(239,68,68,0.1)',
+  yellow: '#f59e0b',
+  yellowDim: 'rgba(245,158,11,0.1)',
+  blue: '#3b82f6',
+  blueDim: 'rgba(59,130,246,0.1)',
+  pink: '#ec4899',
+  pinkDim: 'rgba(236,72,153,0.1)',
+  cyan: '#06b6d4',
+  cyanDim: 'rgba(6,182,212,0.1)',
+}
+
+const SVC_COLORS: Record<string,string> = {
+  Google:'#4285f4',WhatsApp:'#25d366',Telegram:'#229ed9',Facebook:'#1877f2',
+  Amazon:'#ff9900',Microsoft:'#00a4ef',Apple:'#a8a8a8',Twitter:'#1da1f2',
+  Netflix:'#e50914',TikTok:'#ff0050',Discord:'#5865f2',LinkedIn:'#0a66c2',
+  Binance:'#f3ba2f',PayPal:'#003087',Coinbase:'#0052ff',Instagram:'#e1306c',
+  Snapchat:'#fffc00',Uber:'#000000',Airbnb:'#ff5a5f',Shopify:'#96bf48',
+}
+
+function Flag({ code }: { code: string }) {
   try {
-    const c = (country || 'US').toUpperCase().slice(0, 2)
-    return <span style={{ fontSize: 18 }}>{c.split('').map(x => String.fromCodePoint(x.charCodeAt(0) + 127397)).join('')}</span>
-  } catch { return <span style={{ fontSize: 11, color: 'var(--text3)' }}>{country}</span> }
+    const c = (code||'US').toUpperCase().slice(0,2)
+    return <span style={{fontSize:16}}>{c.split('').map(ch=>String.fromCodePoint(ch.charCodeAt(0)+127397)).join('')}</span>
+  } catch { return <span style={{fontSize:11,color:G.text3}}>{code}</span> }
 }
 
-const SVC_COLORS: Record<string, string> = {
-  Google: '#4285f4', WhatsApp: '#25d366', Telegram: '#229ed9', Facebook: '#1877f2',
-  Amazon: '#ff9900', Microsoft: '#00a4ef', Apple: '#777', Twitter: '#1da1f2',
-  Netflix: '#e50914', TikTok: '#ff0050', Discord: '#5865f2', LinkedIn: '#0a66c2',
-  Binance: '#f3ba2f', PayPal: '#003087', Coinbase: '#0052ff', Instagram: '#e1306c',
+function StatCard({ icon, label, value, sub, color, dim, href, delta }: any) {
+  const content = (
+    <div style={{
+      background: G.card, border: `1px solid ${G.border}`,
+      borderRadius: 16, padding: '20px 22px',
+      display: 'flex', alignItems: 'center', gap: 16,
+      cursor: href ? 'pointer' : 'default',
+      transition: 'all .2s ease',
+      position: 'relative', overflow: 'hidden',
+    }}
+    onMouseEnter={e => { if(href) { (e.currentTarget as HTMLDivElement).style.borderColor = color; (e.currentTarget as HTMLDivElement).style.transform = 'translateY(-2px)' }}}
+    onMouseLeave={e => { if(href) { (e.currentTarget as HTMLDivElement).style.borderColor = G.border; (e.currentTarget as HTMLDivElement).style.transform = 'translateY(0)' }}}
+    >
+      <div style={{
+        width: 50, height: 50, borderRadius: 14, flexShrink: 0,
+        background: dim, display: 'flex', alignItems: 'center', justifyContent: 'center',
+        border: `1px solid ${color}22`,
+      }}>
+        <i className={`bi ${icon}`} style={{fontSize: 22, color}} />
+      </div>
+      <div style={{flex:1, minWidth:0}}>
+        <div style={{fontSize:11,fontWeight:600,color:G.text3,textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:4}}>{label}</div>
+        <div style={{fontSize:28,fontWeight:800,color:G.text1,lineHeight:1,letterSpacing:'-0.5px'}}>{value}</div>
+        {sub && <div style={{fontSize:11,color:G.text3,marginTop:4}}>{sub}</div>}
+      </div>
+      {delta !== undefined && (
+        <div style={{
+          fontSize:11,fontWeight:700,padding:'2px 8px',borderRadius:20,
+          background: delta >= 0 ? G.greenDim : G.redDim,
+          color: delta >= 0 ? G.green : G.red,
+          border: `1px solid ${delta >= 0 ? 'rgba(16,185,129,0.2)' : 'rgba(239,68,68,0.2)'}`,
+        }}>
+          {delta >= 0 ? '↑' : '↓'} {Math.abs(delta)}
+        </div>
+      )}
+      <div style={{
+        position:'absolute', top:-20, right:-20, width:80, height:80,
+        borderRadius:'50%', background: `radial-gradient(circle, ${dim} 0%, transparent 70%)`,
+        pointerEvents:'none',
+      }}/>
+    </div>
+  )
+  if (href) return <Link href={href} style={{textDecoration:'none'}}>{content}</Link>
+  return content
 }
 
-function SvcDot({ svc }: { svc: string }) {
-  const c = SVC_COLORS[svc] || 'var(--text3)'
-  return <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: c, background: `${c}18`, border: `1px solid ${c}30`, padding: '2px 8px', borderRadius: 5 }}>{svc}</span>
-}
-
-export default function DashboardPage() {
-  const [stats,     setStats]     = useState({ numbers: 0, active: 0, sms: 0, otps: 0, last24h: 0, countries: 0 })
-  const [analytics, setAnalytics] = useState<any>(null)
-  const [recentSMS, setRecentSMS] = useState<any[]>([])
-  const [activeNums,setActiveNums]= useState<any[]>([])
-  const [allNums,   setAllNums]   = useState<any[]>([])
-  const [sysStatus, setSysStatus] = useState<any[]>([])
-  const [syncing,   setSyncing]   = useState(false)
+export default function Dashboard() {
+  const [nums,    setNums]    = useState<any[]>([])
+  const [sms,     setSms]     = useState<any[]>([])
+  const [loading, setLoading] = useState(true)
   const [injecting, setInjecting] = useState(false)
-  const [syncMsg,   setSyncMsg]   = useState<{ok:boolean;text:string}|null>(null)
-  const [newIds,    setNewIds]    = useState<Set<string>>(new Set())
-  const [copiedOtp, setCopiedOtp] = useState<string|null>(null)
-  const prevTotal = useRef(0)
+  const [syncing, setSyncing] = useState(false)
+  const [msg,     setMsg]     = useState<{ok:boolean,text:string}|null>(null)
+  const [now,     setNow]     = useState(Date.now())
 
-  const fetchAll = useCallback(async () => {
+  const showMsg = (ok: boolean, text: string, ms=6000) => {
+    setMsg({ok,text}); setTimeout(()=>setMsg(null),ms)
+  }
+
+  const load = useCallback(async (quiet=false) => {
+    if(!quiet) setLoading(true)
     try {
-      const [numR, smsR, statR, analR] = await Promise.all([
-        fetch('/api/ivasms/numbers'),
-        fetch('/api/ivasms/sms?limit=25'),
-        fetch('/api/status'),
-        fetch('/api/analytics'),
+      const [nr, sr] = await Promise.all([
+        fetch('/api/ivasms/numbers').then(r=>r.json()).catch(()=>({numbers:[]})),
+        fetch('/api/ivasms/sms?limit=50').then(r=>r.json()).catch(()=>({messages:[]})),
       ])
-
-      if (numR.ok) {
-        const d = await numR.json()
-        const nums = Array.isArray(d.numbers) ? d.numbers : []
-        const active = nums.filter((n: any) => n.status === 'active')
-        const ctries = new Set(nums.map((n: any) => n.country).filter(Boolean))
-        setAllNums(nums)
-        setActiveNums(active.slice(0, 8))
-        setStats(p => ({ ...p, numbers: nums.length, active: active.length, countries: ctries.size }))
-      }
-
-      if (smsR.ok) {
-        const d = await smsR.json()
-        const msgs = Array.isArray(d.messages) ? d.messages : []
-        if (prevTotal.current > 0 && (d.total || 0) > prevTotal.current) {
-          const prev = new Set(recentSMS.map((m: any) => m.id))
-          const incoming = msgs.filter((m: any) => !prev.has(m.id))
-          if (incoming.length > 0) {
-            setNewIds(new Set(incoming.map((m: any) => m.id)))
-            setTimeout(() => setNewIds(new Set()), 3000)
-          }
-        }
-        prevTotal.current = d.total || 0
-        setRecentSMS(msgs)
-        const otps = msgs.filter((m: any) => m.otp).length
-        const now  = Date.now()
-        const last24 = msgs.filter((m: any) => now - new Date(m.received_at).getTime() < 86400000).length
-        setStats(p => ({ ...p, sms: d.total || msgs.length, otps, last24h: last24 }))
-      }
-
-      if (statR.ok) {
-        const d = await statR.json()
-        setSysStatus(d.components || [])
-      }
-
-      if (analR.ok) {
-        const d = await analR.json()
-        setAnalytics(d)
-      }
-    } catch {}
-  }, [recentSMS])
-
-  useEffect(() => {
-    fetchAll()
-    const t = setInterval(fetchAll, 8000)
-    return () => clearInterval(t)
+      setNums(nr.numbers||[])
+      setSms(sr.messages||[])
+    } catch{}
+    setLoading(false)
+    setNow(Date.now())
   }, [])
 
-  const handleSync = async () => {
-    setSyncing(true); setSyncMsg(null)
-    try {
-      const r = await fetch('/api/ivasms/sync', { method: 'POST' })
-      const d = await r.json()
-      setSyncMsg(d.success
-        ? { ok: true, text: `Synced ${d.count} numbers · ${d.smsAdded ?? 0} SMS` }
-        : { ok: false, text: d.error || 'Sync failed' })
-      fetchAll()
-    } catch { setSyncMsg({ ok: false, text: 'Network error' }) }
-    setSyncing(false)
-    setTimeout(() => setSyncMsg(null), 6000)
-  }
+  useEffect(() => { load(); const t=setInterval(()=>load(true),15000); return ()=>clearInterval(t) }, [load])
 
-  const handleInject = async () => {
-    setInjecting(true); setSyncMsg(null)
+  const inject = async () => {
+    setInjecting(true)
     try {
-      const r = await fetch('/api/ivasms/inject', { method: 'POST' })
+      const r = await fetch('/api/ivasms/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
       const d = await r.json()
-      setSyncMsg(d.ok
-        ? { ok: true, text: `Loaded ${d.numbers} numbers + ${d.sms} SMS messages` }
-        : { ok: false, text: d.error || 'Failed' })
-      fetchAll()
-    } catch { setSyncMsg({ ok: false, text: 'Network error' }) }
+      if(r.ok){ showMsg(true,`✅ ${d.count} numbers + ${d.smsCount} SMS loaded!`); await load() }
+      else showMsg(false, d.error||'Failed')
+    } catch(e:any){ showMsg(false,e.message) }
     setInjecting(false)
-    setTimeout(() => setSyncMsg(null), 6000)
   }
 
-  const copyOtp = (otp: string) => {
-    navigator.clipboard.writeText(otp).catch(() => {})
-    setCopiedOtp(otp)
-    setTimeout(() => setCopiedOtp(null), 2000)
-  }
-
-  const fmtTime = (t: string) => {
+  const sync = async () => {
+    setSyncing(true)
     try {
-      const d = new Date(t), diff = (Date.now() - d.getTime()) / 1000
-      if (diff < 60)    return `${Math.floor(diff)}s ago`
-      if (diff < 3600)  return `${Math.floor(diff/60)}m ago`
-      if (diff < 86400) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-      return d.toLocaleDateString()
-    } catch { return t }
+      const r = await fetch('/api/ivasms/sync',{method:'POST'})
+      const d = await r.json()
+      if(d.success!==false){ showMsg(true,`✅ Synced: ${d.count||0} numbers, ${d.smsAdded||0} new SMS`); await load() }
+      else showMsg(false, d.error||'CF protection active — use cookie import')
+    } catch(e:any){ showMsg(false,e.message) }
+    setSyncing(false)
   }
 
-  const topServices = analytics?.topServices || []
-  const topCountries = analytics?.topCountries || []
-  const smsPerDay = analytics?.smsPerDay || []
-  const maxDay = Math.max(...smsPerDay.map((d: any) => d.count), 1)
+  // Stats
+  const active   = nums.filter(n=>(n.status||'active')==='active').length
+  const inactive = nums.filter(n=>n.status && n.status!=='active').length
+  const countries= [...new Set(nums.map(n=>n.country).filter(Boolean))]
+  const totalSms = sms.length
+  const otps     = sms.filter(m=>m.otp)
+  const newOtps  = otps.filter(m=>now-new Date(m.received_at).getTime()<300000)
+  const recentSms= sms.filter(m=>now-new Date(m.received_at).getTime()<3600000)
+
+  // Country breakdown
+  const countryMap: Record<string,{count:number,name:string,sms:number}> = {}
+  nums.forEach(n=>{ if(n.country){ if(!countryMap[n.country]) countryMap[n.country]={count:0,name:n.country_name||n.country,sms:0}; countryMap[n.country].count++ }})
+  sms.forEach(m=>{ const num=nums.find(n=>n.id===m.number_id); if(num?.country && countryMap[num.country]) countryMap[num.country].sms++ })
+  const topCountries = Object.entries(countryMap).sort((a,b)=>b[1].count-a[1].count).slice(0,8)
+
+  // Service breakdown
+  const svcMap: Record<string,number> = {}
+  sms.forEach(m=>{ const s=m.service||'Unknown'; svcMap[s]=(svcMap[s]||0)+1 })
+  const topServices = Object.entries(svcMap).sort((a,b)=>b[1]-a[1]).slice(0,8)
+  const maxSvc = topServices[0]?.[1]||1
+
+  // 7-day chart
+  const days: number[] = Array(7).fill(0)
+  const dayLabels = Array(7).fill(0).map((_,i)=>{
+    const d=new Date(now-(6-i)*86400000)
+    return ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][d.getDay()]
+  })
+  sms.forEach(m=>{
+    const diff = Math.floor((now - new Date(m.received_at).getTime())/86400000)
+    if(diff>=0 && diff<7) days[6-diff]++
+  })
+  const maxDay = Math.max(...days,1)
+
+  if(loading) return (
+    <div style={{display:'flex',alignItems:'center',justifyContent:'center',height:'60vh',flexDirection:'column',gap:16}}>
+      <div style={{width:40,height:40,borderRadius:'50%',border:`3px solid ${G.accentDim}`,borderTop:`3px solid ${G.accent}`,animation:'spin 0.8s linear infinite'}}/>
+      <p style={{color:G.text3,fontSize:13}}>Loading dashboard…</p>
+    </div>
+  )
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 22 }}>
+    <div style={{maxWidth:1400,margin:'0 auto',padding:'0 4px'}}>
+      <style>{`
+        @keyframes spin { to { transform: rotate(360deg); }}
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+        @keyframes slideIn { from{opacity:0;transform:translateY(-8px)} to{opacity:1;transform:translateY(0)} }
+        @keyframes glow { 0%,100%{box-shadow:0 0 4px rgba(16,185,129,0.6)} 50%{box-shadow:0 0 10px rgba(16,185,129,0.9)} }
+        .bar-fill { transition: width 0.6s cubic-bezier(0.4,0,0.2,1); }
+        .day-bar { transition: height 0.5s cubic-bezier(0.4,0,0.2,1); }
+      `}</style>
 
-      {/* ── Header ── */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:28,flexWrap:'wrap',gap:12}}>
         <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, color: 'var(--text)', display: 'flex', alignItems: 'center', gap: 10 }}>
-            <i className="bi bi-speedometer2" style={{ color: 'var(--accent)' }} />Overview
-          </h2>
-          <p style={{ color: 'var(--text3)', fontSize: 13, marginTop: 4, display: 'flex', alignItems: 'center', gap: 8 }}>
-            Real-time SMS monitoring ·
-            <span className="live-badge" style={{ fontSize: 10 }}>
-              <span className="live-dot" />8s refresh
-            </span>
+          <h1 style={{margin:0,fontSize:26,fontWeight:800,color:G.text1,letterSpacing:'-0.5px'}}>
+            Dashboard
+          </h1>
+          <p style={{margin:'4px 0 0',fontSize:13,color:G.text3}}>
+            {new Date().toLocaleDateString('en-US',{weekday:'long',year:'numeric',month:'long',day:'numeric'})}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-          {syncMsg && (
-            <div className={`alert ${syncMsg.ok ? 'alert-success' : 'alert-error'}`} style={{ padding: '6px 12px', fontSize: 12, margin: 0 }}>
-              {syncMsg.text}
-            </div>
-          )}
-          {allNums.length === 0 && (
-            <button onClick={handleInject} disabled={injecting} className="btn-secondary btn-sm" style={{ borderColor: 'var(--blue)', color: 'var(--blue)' }}>
-              <i className="bi bi-database-fill-down" style={{ fontSize: 13 }} />
-              {injecting ? 'Loading…' : 'Load Numbers'}
+        <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
+          {nums.length===0 && (
+            <button onClick={inject} disabled={injecting} style={{
+              display:'flex',alignItems:'center',gap:8,padding:'10px 20px',borderRadius:10,
+              background:`linear-gradient(135deg, ${G.accent}, #a855f7)`,
+              border:'none',color:'#fff',fontSize:13,fontWeight:700,cursor:injecting?'not-allowed':'pointer',
+              opacity:injecting?0.7:1, boxShadow:'0 4px 15px rgba(124,58,237,0.4)',
+              transition:'all .2s ease',
+            }}>
+              <i className={`bi ${injecting?'bi-arrow-repeat':'bi-download'}`} style={{fontSize:14,animation:injecting?'spin 0.8s linear infinite':undefined}}/>
+              {injecting?'Loading…':'Load Numbers'}
             </button>
           )}
-          <button onClick={handleSync} disabled={syncing} className="btn-primary btn-sm" style={{ gap: 6 }}>
-            <i className="bi bi-arrow-repeat" style={{ fontSize: 14, animation: syncing ? 'spin 1s linear infinite' : 'none', display: 'inline-block' }} />
-            {syncing ? 'Syncing…' : 'Sync iVASMS'}
+          <button onClick={sync} disabled={syncing} style={{
+            display:'flex',alignItems:'center',gap:8,padding:'10px 20px',borderRadius:10,
+            background: G.card2, border:`1px solid ${G.border2}`,
+            color:G.text1,fontSize:13,fontWeight:600,cursor:syncing?'not-allowed':'pointer',
+            opacity:syncing?0.7:1, transition:'all .2s ease',
+          }}>
+            <i className={`bi bi-arrow-repeat`} style={{fontSize:14,animation:syncing?'spin 0.8s linear infinite':undefined}}/>
+            {syncing?'Syncing…':'Sync iVASMS'}
           </button>
+          <Link href="/numbers" style={{
+            display:'flex',alignItems:'center',gap:8,padding:'10px 20px',borderRadius:10,
+            background: G.card2, border:`1px solid ${G.border2}`,
+            color:G.text1,fontSize:13,fontWeight:600,textDecoration:'none',
+          }}>
+            <i className="bi bi-phone-fill" style={{fontSize:14,color:G.accent}}/>
+            Numbers
+          </Link>
         </div>
       </div>
 
-      {/* ── Stats grid ── */}
-      <div className="stats-grid">
-        {[
-          { icon: 'bi-phone-fill',     label: 'Total Numbers',    value: stats.numbers,             sub: `${stats.active} active`,             color: 'var(--accent)', live: false },
-          { icon: 'bi-chat-dots-fill', label: 'Total SMS',        value: stats.sms.toLocaleString(), sub: 'All messages received',             color: 'var(--blue)',   live: true  },
-          { icon: 'bi-key-fill',       label: 'OTPs Extracted',   value: stats.otps,                sub: 'Verification codes',                color: 'var(--orange)', live: false },
-          { icon: 'bi-globe',          label: 'Countries',        value: stats.countries,            sub: 'Global coverage',                   color: 'var(--green)',  live: false },
-        ].map(s => (
-          <div key={s.label} className="stat-card">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: `${s.color}18`, border: `1px solid ${s.color}33`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <i className={`bi ${s.icon}`} style={{ fontSize: 18, color: s.color }} />
-              </div>
-              {s.live && <span className="live-badge"><span className="live-dot" />LIVE</span>}
-            </div>
-            <div style={{ fontSize: 28, fontWeight: 900, color: s.color, lineHeight: 1 }}>{s.value}</div>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginTop: 4 }}>{s.label}</div>
-            <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{s.sub}</div>
-          </div>
-        ))}
+      {/* Alert */}
+      {msg && (
+        <div style={{
+          padding:'12px 18px',borderRadius:10,marginBottom:20,fontSize:13,fontWeight:600,
+          background: msg.ok ? G.greenDim : G.redDim,
+          color: msg.ok ? G.green : G.red,
+          border: `1px solid ${msg.ok ? 'rgba(16,185,129,0.3)' : 'rgba(239,68,68,0.3)'}`,
+          animation:'slideIn .2s ease',
+        }}>{msg.text}</div>
+      )}
+
+      {/* Stat Cards */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fill,minmax(200px,1fr))',gap:14,marginBottom:24}}>
+        <StatCard icon="bi-phone-fill"     label="Total Numbers" value={nums.length}   sub={`${active} active, ${inactive} inactive`} color={G.accent} dim={G.accentDim} href="/numbers"/>
+        <StatCard icon="bi-chat-dots-fill" label="Total SMS"     value={totalSms}      sub={`${recentSms.length} in last hour`}         color={G.blue}   dim={G.blueDim}   href="/sms-history"/>
+        <StatCard icon="bi-key-fill"       label="OTPs"          value={otps.length}   sub={`${newOtps.length} new (<5min)`}             color={G.yellow} dim={G.yellowDim} href="/otp-monitor" delta={newOtps.length}/>
+        <StatCard icon="bi-globe2"         label="Countries"     value={countries.length} sub="unique countries"                         color={G.green}  dim={G.greenDim}  href="/countries"/>
+        <StatCard icon="bi-graph-up-arrow" label="Active"        value={active}        sub={`${nums.length>0?Math.round(active/nums.length*100):0}% of total`} color={G.cyan} dim={G.cyanDim}/>
+        <StatCard icon="bi-star-fill"      label="Starred"       value={nums.filter(n=>n.starred).length} sub="starred numbers" color={G.pink} dim={G.pinkDim}/>
       </div>
 
-      {/* ── Main two-col layout ── */}
-      <div className="two-col">
-
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:24}}>
         {/* Live SMS Feed */}
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '14px 18px', borderBottom: '1px solid var(--border)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <i className="bi bi-chat-dots-fill" style={{ color: 'var(--accent)', fontSize: 15 }} />
-              <span style={{ fontWeight: 700, fontSize: 14 }}>Live SMS Feed</span>
-              {recentSMS.length > 0 && <span className="badge badge-gray">{stats.sms.toLocaleString()}</span>}
+        <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:16,overflow:'hidden'}}>
+          <div style={{padding:'16px 20px',borderBottom:`1px solid ${G.border}`,display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <div style={{display:'flex',alignItems:'center',gap:10}}>
+              <div style={{width:8,height:8,borderRadius:'50%',background:G.green,animation:'glow 2s infinite'}}/>
+              <span style={{fontSize:13,fontWeight:700,color:G.text1}}>Live SMS Feed</span>
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span className="live-badge"><span className="live-dot" />8s</span>
-              <Link href="/sms-history" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3 }}>
-                All <i className="bi bi-chevron-right" style={{ fontSize: 10 }} />
-              </Link>
-            </div>
+            <Link href="/sms-history" style={{fontSize:11,color:G.accent,textDecoration:'none',fontWeight:600}}>
+              View all →
+            </Link>
           </div>
-          <div style={{ maxHeight: 480, overflowY: 'auto' }}>
-            {recentSMS.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text3)' }}>
-                <i className="bi bi-chat-dots-fill" style={{ fontSize: 44, display: 'block', marginBottom: 16, opacity: .15 }} />
-                <p style={{ fontSize: 14, fontWeight: 600, color: 'var(--text2)', marginBottom: 8 }}>No SMS yet</p>
-                <p style={{ fontSize: 13, marginBottom: 16 }}>Load numbers or sync iVASMS to see messages.</p>
-                <button onClick={handleInject} disabled={injecting} className="btn-primary btn-sm" style={{ gap: 6 }}>
-                  <i className="bi bi-database-fill-down" style={{ fontSize: 13 }} />
-                  {injecting ? 'Loading…' : 'Load Numbers'}
-                </button>
+          <div style={{maxHeight:320,overflowY:'auto'}}>
+            {sms.length===0 ? (
+              <div style={{padding:40,textAlign:'center'}}>
+                <i className="bi bi-chat-dots" style={{fontSize:32,color:G.text3}}/>
+                <p style={{color:G.text3,fontSize:13,marginTop:12}}>No SMS yet — load numbers first</p>
+                {nums.length===0 && (
+                  <button onClick={inject} disabled={injecting} style={{
+                    marginTop:12,padding:'8px 20px',borderRadius:8,
+                    background:`linear-gradient(135deg,${G.accent},#a855f7)`,
+                    border:'none',color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',
+                  }}>{injecting?'Loading…':'Load Numbers'}</button>
+                )}
               </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: 8 }}>
-                {recentSMS.map((sms: any) => (
-                  <div key={sms.id} className={`sms-item ${newIds.has(sms.id) ? 'new-sms' : ''}`}
-                    style={{ position: 'relative' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: 'monospace' }}>
-                        {sms.phone_number || sms.sender}
+            ) : sms.slice(0,15).map(m=>{
+              const isNew = now-new Date(m.received_at).getTime()<300000
+              const svcColor = SVC_COLORS[m.service]||G.text3
+              return (
+                <div key={m.id} style={{
+                  padding:'12px 20px',borderBottom:`1px solid ${G.border}`,
+                  display:'flex',gap:12,alignItems:'flex-start',
+                  background: isNew ? 'rgba(124,58,237,0.04)' : 'transparent',
+                  transition:'background .2s',
+                }}>
+                  <div style={{
+                    width:36,height:36,borderRadius:10,flexShrink:0,
+                    background:`${svcColor}20`,border:`1px solid ${svcColor}30`,
+                    display:'flex',alignItems:'center',justifyContent:'center',
+                    fontSize:11,fontWeight:800,color:svcColor,
+                  }}>{(m.service||'?').slice(0,2).toUpperCase()}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:3}}>
+                      <span style={{fontSize:12,fontWeight:700,color:G.text1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                        {m.service||'Unknown'}
                       </span>
-                      {sms.service && sms.service !== 'Unknown' && <SvcDot svc={sms.service} />}
-                      <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 3 }}>
-                        <i className="bi bi-clock-fill" style={{ fontSize: 9 }} />{fmtTime(sms.received_at)}
-                      </span>
+                      {isNew && <span style={{fontSize:9,fontWeight:800,padding:'1px 6px',borderRadius:10,background:G.accentDim,color:G.accentHover,border:`1px solid ${G.accent}40`,textTransform:'uppercase',letterSpacing:'0.05em'}}>NEW</span>}
+                      {m.otp && <span style={{fontSize:9,fontWeight:800,padding:'1px 6px',borderRadius:10,background:G.yellowDim,color:G.yellow,border:`1px solid ${G.yellow}40`,textTransform:'uppercase'}}>OTP</span>}
                     </div>
-                    <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                      <p style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.5, flex: 1 }}>{sms.body}</p>
-                      {sms.otp && (
-                        <button onClick={() => copyOtp(sms.otp)}
-                          style={{ background: 'rgba(229,9,20,.1)', border: '1px solid rgba(229,9,20,.3)',
-                            color: 'var(--accent)', fontWeight: 900, fontSize: 15,
-                            padding: '3px 10px', borderRadius: 7, cursor: 'pointer',
-                            fontFamily: 'monospace', letterSpacing: 3, whiteSpace: 'nowrap', flexShrink: 0,
-                            display: 'flex', alignItems: 'center', gap: 5 }}
-                          title="Click to copy">
-                          <i className="bi bi-key-fill" style={{ fontSize: 10 }} />{sms.otp}
-                          <i className={`bi ${copiedOtp === sms.otp ? 'bi-clipboard-check-fill' : 'bi-clipboard'}`} style={{ fontSize: 10, opacity: .7 }} />
-                        </button>
-                      )}
-                    </div>
+                    <div style={{fontSize:12,color:G.text2,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{m.body||''}</div>
+                    {m.otp && <div style={{marginTop:4,fontSize:14,fontWeight:800,color:G.yellow,letterSpacing:'0.1em'}}>{m.otp}</div>}
+                    <div style={{fontSize:10,color:G.text3,marginTop:3}}>{m.phone_number||''} · {m.received_at?new Date(m.received_at).toLocaleTimeString():''}</div>
                   </div>
-                ))}
-              </div>
-            )}
+                </div>
+              )
+            })}
           </div>
         </div>
 
         {/* Right column */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-
-          {/* Active numbers */}
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <i className="bi bi-phone-fill" style={{ color: 'var(--green)', fontSize: 14 }} />
-                <span style={{ fontWeight: 700, fontSize: 13 }}>Active Numbers</span>
-                <span className="badge badge-green" style={{ fontSize: 10 }}>{stats.active}</span>
-              </div>
-              <Link href="/numbers" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3 }}>
-                All <i className="bi bi-chevron-right" style={{ fontSize: 10 }} />
-              </Link>
+        <div style={{display:'flex',flexDirection:'column',gap:20}}>
+          {/* 7-day chart */}
+          <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:16,padding:'20px'}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}}>
+              <span style={{fontSize:13,fontWeight:700,color:G.text1}}>7-Day SMS Activity</span>
+              <span style={{fontSize:11,color:G.text3}}>{totalSms} total</span>
             </div>
-            {activeNums.length === 0 ? (
-              <div style={{ padding: '20px', textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>
-                <i className="bi bi-phone-fill" style={{ fontSize: 28, display: 'block', marginBottom: 8, opacity: .15 }} />
-                No active numbers
-                <div style={{ marginTop: 10 }}>
-                  <button onClick={handleInject} disabled={injecting} className="btn-primary btn-xs" style={{ gap: 5 }}>
-                    <i className="bi bi-database-fill-down" style={{ fontSize: 11 }} />Load Numbers
-                  </button>
+            <div style={{display:'flex',alignItems:'flex-end',gap:8,height:80}}>
+              {days.map((v,i)=>(
+                <div key={i} style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',gap:4}}>
+                  <div style={{
+                    width:'100%',borderRadius:'4px 4px 0 0',
+                    background: i===6 ? `linear-gradient(to top, ${G.accent}, #a855f7)` : `${G.accent}40`,
+                    height: `${Math.round((v/maxDay)*100)}%`,
+                    minHeight: v>0?4:0,
+                    transition:'height 0.5s ease',
+                    position:'relative',
+                  }}>
+                    {v>0 && i===6 && <div style={{position:'absolute',top:-18,left:'50%',transform:'translateX(-50%)',fontSize:10,fontWeight:700,color:G.accent,whiteSpace:'nowrap'}}>{v}</div>}
+                  </div>
+                  <span style={{fontSize:9,color:G.text3,fontWeight:600}}>{dayLabels[i]}</span>
                 </div>
-              </div>
-            ) : (
-              <div style={{ padding: '4px 8px' }}>
-                {activeNums.map((n: any) => (
-                  <div key={n.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: 7, transition: 'background .15s', cursor: 'default' }}
-                    onMouseEnter={e => (e.currentTarget.style.background = 'var(--bg2)')}
-                    onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}>
-                    <CountryFlag country={n.country} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: 12, fontWeight: 600, fontFamily: 'monospace', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{n.phone}</div>
-                      <div style={{ fontSize: 10, color: 'var(--text3)' }}>{n.country_name || n.country}</div>
-                    </div>
-                    <span style={{ fontSize: 11, color: 'var(--text3)', display: 'flex', alignItems: 'center', gap: 3 }}>
-                      <i className="bi bi-chat-dots-fill" style={{ fontSize: 9 }} />{n.sms_count || 0}
-                    </span>
-                    <span className="dot dot-green dot-pulse" style={{ width: 6, height: 6 }} />
-                  </div>
-                ))}
-                {allNums.filter((n: any) => n.status !== 'active').length > 0 && (
-                  <div style={{ margin: '4px 8px', padding: '4px 8px', borderRadius: 6, background: 'rgba(74,74,106,.1)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <span className="dot dot-gray" style={{ width: 5, height: 5 }} />
-                    <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-                      {allNums.filter((n: any) => n.status !== 'active').length} inactive
-                    </span>
-                    <Link href="/numbers" style={{ fontSize: 10, color: 'var(--accent)', textDecoration: 'none', marginLeft: 'auto' }}>View all</Link>
-                  </div>
-                )}
-              </div>
-            )}
+              ))}
+            </div>
           </div>
 
           {/* Top Services */}
-          {topServices.length > 0 && (
-            <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '13px 16px', borderBottom: '1px solid var(--border)' }}>
-                <i className="bi bi-grid-fill" style={{ color: 'var(--blue)', fontSize: 14 }} />
-                <span style={{ fontWeight: 700, fontSize: 13 }}>Top Services</span>
-                <Link href="/analytics" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none', marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 3 }}>
-                  Details <i className="bi bi-chevron-right" style={{ fontSize: 10 }} />
-                </Link>
-              </div>
-              <div style={{ padding: '10px 16px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {topServices.slice(0, 5).map((s: any) => {
-                  const total = topServices.reduce((a: number, b: any) => a + b.count, 0)
-                  const pct = total > 0 ? Math.round(s.count / total * 100) : 0
-                  const c = SVC_COLORS[s.name] || 'var(--accent)'
-                  return (
-                    <div key={s.name}>
-                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-                        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text2)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <span style={{ width: 8, height: 8, borderRadius: 2, background: c, display: 'inline-block' }} />{s.name}
-                        </span>
-                        <span style={{ fontSize: 11, color: 'var(--text3)' }}>{s.count} ({pct}%)</span>
-                      </div>
-                      <div className="progress">
-                        <div className="progress-fill" style={{ width: `${pct}%`, background: c }} />
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
+          <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:16,padding:'20px',flex:1}}>
+            <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+              <span style={{fontSize:13,fontWeight:700,color:G.text1}}>Top Services</span>
+              <Link href="/sms-history" style={{fontSize:11,color:G.accent,textDecoration:'none'}}>View all →</Link>
             </div>
-          )}
-
-          {/* SMS per day mini chart */}
-          {smsPerDay.length > 0 && (
-            <div className="card">
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-                <i className="bi bi-graph-up" style={{ color: 'var(--accent)', fontSize: 14 }} />
-                <span style={{ fontWeight: 700, fontSize: 13 }}>SMS Last 7 Days</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'flex-end', gap: 3, height: 60 }}>
-                {smsPerDay.slice(-7).map((d: any, i: number) => (
-                  <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, height: '100%' }}>
-                    <div style={{ flex: 1, display: 'flex', alignItems: 'flex-end', width: '100%' }}>
-                      <div style={{ width: '100%', height: `${Math.max(4, (d.count/maxDay)*100)}%`,
-                        background: d.count > 0 ? 'linear-gradient(180deg,var(--accent),#c40812)' : 'var(--border)',
-                        borderRadius: '2px 2px 0 0', minHeight: 4 }}
-                        title={`${d.date}: ${d.count}`} />
-                    </div>
-                    <div style={{ fontSize: 9, color: 'var(--text3)' }}>{(d.date||'').slice(-2)}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* System Health */}
-          <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '13px 16px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <i className="bi bi-activity" style={{ color: 'var(--green)', fontSize: 14 }} />
-                <span style={{ fontWeight: 700, fontSize: 13 }}>System Health</span>
-              </div>
-              <Link href="/status" style={{ fontSize: 12, color: 'var(--accent)', textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 3 }}>
-                View <i className="bi bi-chevron-right" style={{ fontSize: 10 }} />
-              </Link>
-            </div>
-            <div style={{ padding: '6px 8px' }}>
-              {sysStatus.slice(0, 5).map((c: any) => (
-                <div key={c.name} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px', borderRadius: 7 }}>
-                  <span className={`dot ${c.ok ? 'dot-green dot-pulse' : 'dot-red'}`} style={{ width: 7, height: 7 }} />
-                  <span style={{ flex: 1, fontSize: 12, color: 'var(--text)' }}>{c.name}</span>
-                  <span style={{ fontSize: 11, color: c.ok ? 'var(--green)' : 'var(--accent)' }}>
-                    {c.ok ? 'OK' : 'Down'}
-                    {c.latency > 0 && <span style={{ color: 'var(--text3)', marginLeft: 4 }}>{c.latency}ms</span>}
-                  </span>
+            {topServices.length===0 ? (
+              <p style={{color:G.text3,fontSize:12,textAlign:'center',padding:'20px 0'}}>No SMS data yet</p>
+            ) : topServices.map(([svc,count])=>(
+              <div key={svc} style={{marginBottom:10}}>
+                <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                  <span style={{fontSize:12,fontWeight:600,color:G.text2}}>{svc}</span>
+                  <span style={{fontSize:12,fontWeight:700,color:SVC_COLORS[svc]||G.text1}}>{count}</span>
                 </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick Actions */}
-          <div className="card">
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-              <i className="bi bi-lightning-fill" style={{ color: 'var(--orange)' }} />Quick Actions
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 8 }}>
-              {[
-                { label: 'Numbers',     href: '/numbers',     icon: 'bi-phone-fill',        color: 'var(--accent)'  },
-                { label: 'OTP Monitor', href: '/otp-monitor', icon: 'bi-key-fill',          color: 'var(--orange)'  },
-                { label: 'Analytics',   href: '/analytics',   icon: 'bi-bar-chart-fill',    color: 'var(--blue)'    },
-                { label: 'WhatsApp',    href: '/whatsapp',    icon: 'bi-whatsapp',          color: '#25d366'        },
-                { label: 'Telegram',    href: '/telegram-bot',icon: 'bi-telegram',          color: '#229ed9'        },
-                { label: 'DL Chat',     href: '/chat',        icon: 'bi-chat-square-dots-fill', color: 'var(--purple)' },
-              ].map(a => (
-                <Link key={a.label} href={a.href} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5, padding: '10px 6px', borderRadius: 8, textDecoration: 'none', background: `${a.color}10`, border: `1px solid ${a.color}20`, transition: 'all .2s' }}
-                  onMouseEnter={e => { (e.currentTarget as any).style.background = `${a.color}22`; (e.currentTarget as any).style.borderColor = `${a.color}50` }}
-                  onMouseLeave={e => { (e.currentTarget as any).style.background = `${a.color}10`; (e.currentTarget as any).style.borderColor = `${a.color}20` }}>
-                  <i className={`bi ${a.icon}`} style={{ fontSize: 18, color: a.color }} />
-                  <span style={{ fontSize: 10, fontWeight: 600, color: a.color, textAlign: 'center' }}>{a.label}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
-
-        </div>
-      </div>
-
-      {/* ── Country breakdown row ── */}
-      {topCountries.length > 0 && (
-        <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-          <div style={{ padding: '13px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <i className="bi bi-globe" style={{ color: 'var(--green)', fontSize: 14 }} />
-            <span style={{ fontWeight: 700, fontSize: 13 }}>Coverage by Country</span>
-          </div>
-          <div style={{ padding: '10px 16px', display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', gap: 8 }}>
-            {topCountries.slice(0, 10).map((c: any) => (
-              <div key={c.country} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px', background: 'var(--bg2)', borderRadius: 8 }}>
-                <CountryFlag country={c.country} />
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{c.country}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text3)' }}>{c.numbers} nums · {c.sms} SMS</div>
+                <div style={{height:4,borderRadius:2,background:G.border,overflow:'hidden'}}>
+                  <div className="bar-fill" style={{height:'100%',borderRadius:2,width:`${(count/maxSvc)*100}%`,background:`linear-gradient(to right,${SVC_COLORS[svc]||G.accent},${SVC_COLORS[svc]||G.accentHover}80)`}}/>
                 </div>
               </div>
             ))}
           </div>
         </div>
-      )}
+      </div>
+
+      {/* Country Grid + Quick Nav */}
+      <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:24}}>
+        {/* Countries */}
+        <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:16,padding:'20px'}}>
+          <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
+            <span style={{fontSize:13,fontWeight:700,color:G.text1}}>Countries</span>
+            <Link href="/countries" style={{fontSize:11,color:G.accent,textDecoration:'none'}}>View all →</Link>
+          </div>
+          {topCountries.length===0 ? (
+            <p style={{color:G.text3,fontSize:12,textAlign:'center',padding:'20px 0'}}>No numbers yet</p>
+          ) : (
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+              {topCountries.map(([code,info])=>(
+                <div key={code} style={{
+                  display:'flex',alignItems:'center',gap:10,
+                  padding:'10px 12px',borderRadius:10,
+                  background:G.card2,border:`1px solid ${G.border}`,
+                }}>
+                  <Flag code={code}/>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:12,fontWeight:700,color:G.text1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{info.name}</div>
+                    <div style={{fontSize:10,color:G.text3}}>{info.count} number{info.count!==1?'s':''}</div>
+                  </div>
+                  <span style={{fontSize:13,fontWeight:800,color:G.accent}}>{info.count}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Quick Navigation */}
+        <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:16,padding:'20px'}}>
+          <span style={{fontSize:13,fontWeight:700,color:G.text1,display:'block',marginBottom:16}}>Quick Navigation</span>
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8}}>
+            {[
+              {href:'/numbers',      icon:'bi-phone-fill',          label:'Numbers',      color:G.accent},
+              {href:'/sms-history',  icon:'bi-chat-dots-fill',      label:'SMS History',  color:G.blue},
+              {href:'/otp-monitor',  icon:'bi-key-fill',            label:'OTP Monitor',  color:G.yellow},
+              {href:'/analytics',    icon:'bi-bar-chart-fill',      label:'Analytics',    color:G.green},
+              {href:'/whatsapp',     icon:'bi-whatsapp',            label:'WhatsApp',     color:'#25d366'},
+              {href:'/telegram-bot', icon:'bi-telegram',            label:'Telegram',     color:'#229ed9'},
+              {href:'/countries',    icon:'bi-globe2',              label:'Countries',    color:G.cyan},
+              {href:'/settings',     icon:'bi-gear-fill',           label:'Settings',     color:G.text3},
+              {href:'/pin-vault',    icon:'bi-safe-fill',           label:'PIN Vault',    color:G.pink},
+              {href:'/scheduler',    icon:'bi-clock-fill',          label:'Scheduler',    color:'#f97316'},
+            ].map(item=>(
+              <Link key={item.href} href={item.href} style={{
+                display:'flex',alignItems:'center',gap:10,
+                padding:'10px 12px',borderRadius:10,
+                background:G.card2,border:`1px solid ${G.border}`,
+                textDecoration:'none',color:G.text2,fontSize:12,fontWeight:600,
+                transition:'all .15s ease',
+              }}
+              onMouseEnter={e=>{(e.currentTarget as HTMLAnchorElement).style.borderColor=item.color;(e.currentTarget as HTMLAnchorElement).style.color=G.text1}}
+              onMouseLeave={e=>{(e.currentTarget as HTMLAnchorElement).style.borderColor=G.border;(e.currentTarget as HTMLAnchorElement).style.color=G.text2}}
+              >
+                <i className={`bi ${item.icon}`} style={{fontSize:14,color:item.color,flexShrink:0}}/>
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* iVASMS CF Notice */}
+      <div style={{
+        padding:'16px 20px',borderRadius:12,
+        background:'rgba(245,158,11,0.06)',
+        border:`1px solid rgba(245,158,11,0.2)`,
+        display:'flex',alignItems:'flex-start',gap:14,
+      }}>
+        <i className="bi bi-shield-exclamation" style={{fontSize:18,color:G.yellow,flexShrink:0,marginTop:1}}/>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:G.yellow,marginBottom:4}}>iVASMS Cloudflare Protection</div>
+          <div style={{fontSize:12,color:G.text2,lineHeight:1.6}}>
+            iVASMS.com uses Cloudflare Managed Challenge — server-side login is blocked. 
+            To get real numbers: <strong style={{color:G.text1}}>Login at ivasms.com in your browser</strong>, then go to <Link href="/numbers" style={{color:G.accent,textDecoration:'none',fontWeight:700}}>Numbers page</Link> and use <strong style={{color:G.text1}}>"Import Cookies"</strong> to paste your browser session. 
+            Or click <strong style={{color:G.text1,cursor:'pointer'}} onClick={inject}>"Load Numbers"</strong> above for demo data.
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
