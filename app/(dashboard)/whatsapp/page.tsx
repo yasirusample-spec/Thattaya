@@ -1,574 +1,608 @@
 'use client'
 import { useState, useEffect, useRef, useCallback } from 'react'
 
-interface WaConfig {
-  phoneId: string; wabaId: string; hasToken: boolean; tokenPreview: string
-  webhookVerify: string; phoneNumber: string; displayName: string
-  status: string; configuredAt: string | null
-}
-interface Contact {
-  id: string; name: string; phone: string; avatar: string | null
-  addedAt: string; lastMessage: string | null; lastMessageAt: string | null; unread: number
-}
-interface Message {
-  id: string; meta_id?: string; from: 'me' | string; to: string; body: string
-  type?: string; sent_at: string; status: string; incoming?: boolean; via_cloud_api?: boolean
+const G = {
+  bg:'#0a0a0f', card:'#111118', card2:'#16161f', card3:'#1a1a24',
+  border:'rgba(255,255,255,0.07)', border2:'rgba(255,255,255,0.12)',
+  text1:'#f0f0f8', text2:'#a0a0b8', text3:'#60607a',
+  accent:'#7c3aed', accentDim:'rgba(124,58,237,0.15)',
+  green:'#10b981', greenDim:'rgba(16,185,129,0.12)',
+  red:'#ef4444', redDim:'rgba(239,68,68,0.1)',
+  yellow:'#f59e0b', yellowDim:'rgba(245,158,11,0.1)',
+  blue:'#3b82f6',
+  waGreen:'#25d366', waPanel:'#111b21', waMsg:'#005c4b', waBg:'#0b141a',
 }
 
-const WA_GREEN = '#25D366'
-const WA_DARK  = '#111b21'
-const WA_PANEL = '#202c33'
-const WA_MSG   = '#005c4b'
+interface Cfg { phoneId:string; wabaId:string; hasToken:boolean; tokenPreview:string; webhookVerify:string; phoneNumber:string; displayName:string; status:string; configuredAt:string|null; verified:boolean }
+interface Contact { id:string; name:string; phone:string; avatar:string|null; addedAt:string; lastMessage:string|null; lastMessageAt:string|null; unread:number }
+interface Msg { id:string; meta_id?:string; from:string; to:string; body:string; type?:string; sent_at:string; status:string; incoming?:boolean; via_cloud_api?:boolean }
 
 export default function WhatsAppPage() {
-  const [cfg,            setCfg]           = useState<WaConfig | null>(null)
-  const [cfgLoading,     setCfgLoading]    = useState(true)
-  const [tab,            setTab]           = useState<'chat'|'setup'|'broadcast'>('chat')
-  const [contacts,       setContacts]      = useState<Contact[]>([])
-  const [active,         setActive]        = useState<Contact | null>(null)
-  const [thread,         setThread]        = useState<Message[]>([])
-  const [msgInput,       setMsgInput]      = useState('')
-  const [sending,        setSending]       = useState(false)
-  const [sendError,      setSendError]     = useState('')
-  const [search,         setSearch]        = useState('')
-  // Setup form
-  const [form,           setForm]          = useState({ phoneId: '', token: '', wabaId: '', webhookVerify: '' })
-  const [setupResult,    setSetupResult]   = useState<any>(null)
-  const [setupLoading,   setSetupLoading]  = useState(false)
-  // Add contact
-  const [showAddContact, setShowAddContact]= useState(false)
-  const [newContact,     setNewContact]    = useState({ name: '', phone: '' })
-  const [addingContact,  setAddingContact] = useState(false)
-  // Broadcast
-  const [bcTemplate,    setBcTemplate]    = useState('')
-  const [bcNumbers,     setBcNumbers]     = useState('')
-  const [bcSending,     setBcSending]     = useState(false)
-  const [bcResult,      setBcResult]      = useState<any>(null)
-  const [templates,     setTemplates]     = useState<any[]>([])
-  const [waNumbers,     setWaNumbers]     = useState<any[]>([])
-
+  const [cfg,           setCfg]          = useState<Cfg|null>(null)
+  const [cfgLoading,    setCfgLoading]   = useState(true)
+  const [tab,           setTab]          = useState<'chat'|'setup'|'broadcast'|'guide'>('setup')
+  const [contacts,      setContacts]     = useState<Contact[]>([])
+  const [active,        setActive]       = useState<Contact|null>(null)
+  const [thread,        setThread]       = useState<Msg[]>([])
+  const [msgInput,      setMsgInput]     = useState('')
+  const [sending,       setSending]      = useState(false)
+  const [sendErr,       setSendErr]      = useState('')
+  const [search,        setSearch]       = useState('')
+  const [form,          setForm]         = useState({phoneId:'',token:'',wabaId:'',webhookVerify:''})
+  const [setupResult,   setSetupResult]  = useState<any>(null)
+  const [setupLoading,  setSetupLoading] = useState(false)
+  const [showAdd,       setShowAdd]      = useState(false)
+  const [newC,          setNewC]         = useState({name:'',phone:''})
+  const [addingC,       setAddingC]      = useState(false)
+  const [bcMsg,         setBcMsg]        = useState('')
+  const [bcNums,        setBcNums]       = useState('')
+  const [bcSending,     setBcSending]    = useState(false)
+  const [bcResult,      setBcResult]     = useState<any>(null)
+  const [templates,     setTemplates]    = useState<any[]>([])
+  const [waNumbers,     setWaNumbers]    = useState<any[]>([])
+  const [msgAlert,      setMsgAlert]     = useState<{ok:boolean,text:string}|null>(null)
+  const [copied,        setCopied]       = useState<string|null>(null)
   const msgEndRef = useRef<HTMLDivElement>(null)
-  const pollRef   = useRef<ReturnType<typeof setInterval> | null>(null)
-  const inputRef  = useRef<HTMLInputElement>(null)
+  const pollRef   = useRef<any>(null)
 
-  // ── Load WA config ────────────────────────────────────────────────────────
-  useEffect(() => {
-    fetch('/api/wa/config').then(r => r.json()).then(d => {
-      setCfg(d)
-      setCfgLoading(false)
-      if (d.status === 'active') {
-        setTab('chat')
-        fetch('/api/wa/numbers').then(r=>r.json()).then(d=>setWaNumbers(d.numbers||[]))
-        fetch('/api/wa/templates').then(r=>r.json()).then(d=>setTemplates(d.templates||[]))
-      } else {
-        setTab('setup')
+  const showAlert=(ok:boolean,text:string,ms=6000)=>{setMsgAlert({ok,text});setTimeout(()=>setMsgAlert(null),ms)}
+  const copyText=(text:string,k:string)=>{navigator.clipboard.writeText(text).catch(()=>{});setCopied(k);setTimeout(()=>setCopied(null),2000)}
+
+  const loadCfg=useCallback(async()=>{
+    try{
+      const r=await fetch('/api/wa/config')
+      if(r.ok){
+        const d=await r.json()
+        setCfg(d)
+        if(d.status==='active'){
+          setTab('chat')
+          fetch('/api/wa/numbers').then(r=>r.json()).then(d=>setWaNumbers(d.numbers||[]))
+          fetch('/api/wa/templates').then(r=>r.json()).then(d=>setTemplates(d.templates||[]))
+        }
       }
-    }).catch(() => setCfgLoading(false))
-  }, [])
+    }catch{}
+    setCfgLoading(false)
+  },[])
 
-  // ── Load contacts ─────────────────────────────────────────────────────────
-  useEffect(() => {
-    fetch('/api/whatsapp/contacts').then(r => r.json()).then(d => {
-      setContacts(Array.isArray(d.contacts) ? d.contacts : [])
-    }).catch(() => {})
-  }, [])
+  const loadContacts=useCallback(async()=>{
+    try{
+      const r=await fetch('/api/whatsapp/contacts')
+      if(r.ok){const d=await r.json();setContacts(Array.isArray(d.contacts)?d.contacts:[])}
+    }catch{}
+  },[])
 
-  // ── Open contact → load thread + poll ────────────────────────────────────
-  const openContact = useCallback((c: Contact) => {
-    setActive(c)
-    setSendError('')
-    setMsgInput('')
-    if (pollRef.current) clearInterval(pollRef.current)
-    const load = () => {
-      fetch(`/api/whatsapp/thread?phone=${encodeURIComponent(c.phone)}`).then(r=>r.json()).then(d=>{
-        setThread(Array.isArray(d.messages) ? d.messages : [])
-        setContacts(prev => prev.map(x => x.id === c.id ? { ...x, unread: 0 } : x))
-      }).catch(()=>{})
+  const loadThread=useCallback(async(phone:string,quiet=false)=>{
+    try{
+      const r=await fetch(`/api/whatsapp/thread?phone=${encodeURIComponent(phone)}`)
+      if(r.ok){const d=await r.json();setThread(Array.isArray(d.messages)?d.messages:[])}
+    }catch{}
+  },[])
+
+  useEffect(()=>{loadCfg();loadContacts()},[loadCfg,loadContacts])
+
+  useEffect(()=>{
+    clearInterval(pollRef.current)
+    if(active){
+      loadThread(active.phone)
+      pollRef.current=setInterval(()=>loadThread(active.phone,true),3000)
     }
-    load()
-    pollRef.current = setInterval(load, 3000)
-    setTimeout(() => inputRef.current?.focus(), 100)
-  }, [])
+    return ()=>clearInterval(pollRef.current)
+  },[active,loadThread])
 
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current) }, [])
-  useEffect(() => { msgEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [thread])
+  useEffect(()=>{msgEndRef.current?.scrollIntoView({behavior:'smooth'})},[thread])
 
-  // ── Send message ──────────────────────────────────────────────────────────
-  const sendMessage = async () => {
-    if (!msgInput.trim() || !active || sending) return
-    const text = msgInput.trim()
-    setMsgInput('')
-    setSending(true)
-    setSendError('')
-    try {
-      const r = await fetch('/api/whatsapp/send', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: active.phone, message: text }),
-      })
-      const d = await r.json()
-      if (!r.ok) { setSendError(d.error || 'Send failed'); return }
-      const msg: Message = d.message
-      setThread(prev => [...prev, msg])
-      setContacts(prev => prev.map(c => c.id === active.id
-        ? { ...c, lastMessage: text.slice(0,80), lastMessageAt: msg.sent_at } : c))
-    } catch (e: any) { setSendError(e.message) }
+  const openContact=(c:Contact)=>{
+    setActive(c);setSendErr('');setMsgInput('')
+    setContacts(p=>p.map(x=>x.id===c.id?{...x,unread:0}:x))
+  }
+
+  const sendMsg=async()=>{
+    if(!active||!msgInput.trim()) return
+    setSending(true);setSendErr('')
+    const text=msgInput.trim();setMsgInput('')
+    try{
+      const r=await fetch('/api/whatsapp/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to:active.phone,message:text})})
+      const d=await r.json()
+      if(r.ok){
+        setThread(p=>[...p,d.message])
+        setContacts(p=>p.map(c=>c.id===active.id?{...c,lastMessage:text,lastMessageAt:new Date().toISOString()}:c))
+        if(!d.sentViaCloudApi&&cfg?.status!=='active') setSendErr('Saved locally (WhatsApp Cloud API not configured)')
+      } else setSendErr(d.error||'Send failed')
+    }catch(e:any){setSendErr(e.message)}
     setSending(false)
   }
 
-  // ── Add contact ───────────────────────────────────────────────────────────
-  const addContact = async () => {
-    if (!newContact.phone) return
-    setAddingContact(true)
-    try {
-      const r = await fetch('/api/whatsapp/contacts', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newContact),
-      })
-      const d = await r.json()
-      if (r.ok) {
-        setContacts(prev => [d.contact, ...prev])
-        setNewContact({ name: '', phone: '' })
-        setShowAddContact(false)
-      }
-    } catch {}
-    setAddingContact(false)
+  const addContact=async()=>{
+    if(!newC.phone.trim()) return
+    setAddingC(true)
+    try{
+      const r=await fetch('/api/whatsapp/contacts',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:newC.name||newC.phone,phone:newC.phone})})
+      const d=await r.json()
+      if(r.ok){setContacts(p=>[d.contact,...p]);setShowAdd(false);setNewC({name:'',phone:''});showAlert(true,'Contact added!')}
+      else showAlert(false,d.error||'Failed')
+    }catch(e:any){showAlert(false,(e as any).message)}
+    setAddingC(false)
   }
 
-  // ── Save WA Cloud API config ──────────────────────────────────────────────
-  const saveConfig = async () => {
-    if (!form.phoneId || !form.token) { setSetupResult({ error: 'Phone ID and Token are required' }); return }
-    setSetupLoading(true); setSetupResult(null)
-    try {
-      const r = await fetch('/api/wa/config', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
-      })
-      const d = await r.json()
+  const setupWA=async()=>{
+    setSetupLoading(true);setSetupResult(null)
+    try{
+      const r=await fetch('/api/wa/config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(form)})
+      const d=await r.json()
       setSetupResult(d)
-      if (d.verified) {
-        setCfg({ ...form, hasToken: true, tokenPreview: form.token.slice(0,12)+'…',
-          phoneNumber: d.phoneNumber, displayName: d.displayName,
-          status: 'active', configuredAt: new Date().toISOString(), webhookVerify: d.webhookVerify })
-        fetch('/api/wa/numbers').then(r=>r.json()).then(d=>setWaNumbers(d.numbers||[]))
-        fetch('/api/wa/templates').then(r=>r.json()).then(d=>setTemplates(d.templates||[]))
-        setTimeout(() => setTab('chat'), 1500)
-      }
-    } catch (e: any) { setSetupResult({ error: e.message }) }
+      if(d.ok&&d.verified) loadCfg()
+    }catch(e:any){setSetupResult({error:(e as any).message})}
     setSetupLoading(false)
   }
 
-  // ── Broadcast ─────────────────────────────────────────────────────────────
-  const sendBroadcast = async () => {
-    if (!bcTemplate || !bcNumbers.trim()) return
-    setBcSending(true); setBcResult(null)
-    const recipients = bcNumbers.split(/[\n,;]+/).map(s=>s.trim()).filter(Boolean)
-    try {
-      const r = await fetch('/api/wa/broadcast', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ templateName: bcTemplate, recipients }),
-      })
-      setBcResult(await r.json())
-    } catch (e: any) { setBcResult({ error: e.message }) }
+  const sendBroadcast=async()=>{
+    if(!bcMsg.trim()||!bcNums.trim()) return
+    setBcSending(true);setBcResult(null)
+    const list=bcNums.split('\n').map(s=>s.trim()).filter(Boolean)
+    try{
+      const results=[]
+      for(const phone of list.slice(0,50)){
+        const r=await fetch('/api/whatsapp/send',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({to:phone,message:bcMsg})})
+        const d=await r.json()
+        results.push({phone,ok:r.ok,error:d.error})
+      }
+      setBcResult({sent:results.filter(x=>x.ok).length,failed:results.filter(x=>!x.ok).length,results})
+    }catch(e:any){setBcResult({error:(e as any).message})}
     setBcSending(false)
   }
 
-  const filtered = contacts.filter(c =>
-    !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search))
+  const inp={width:'100%',padding:'10px 14px',borderRadius:10,background:G.card2,border:`1px solid ${G.border2}`,color:G.text1,fontSize:13,outline:'none',boxSizing:'border-box' as const}
+  const Label=({c}:{c:string})=><div style={{fontSize:11,fontWeight:700,color:G.text3,textTransform:'uppercase' as const,letterSpacing:'0.07em',marginBottom:6}}>{c}</div>
 
-  const fmt = (iso: string) => {
-    const d = new Date(iso)
-    const now = new Date()
-    const diffDays = Math.floor((now.getTime() - d.getTime()) / 86400000)
-    if (diffDays === 0) return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    if (diffDays === 1) return 'Yesterday'
-    return d.toLocaleDateString([], { month: 'short', day: 'numeric' })
-  }
-
-  const isConfigured = cfg?.status === 'active'
+  const TABS=[
+    {id:'chat',    icon:'bi-chat-dots-fill',  label:'Chat'},
+    {id:'setup',   icon:'bi-gear-fill',       label:'Setup'},
+    {id:'broadcast',icon:'bi-send-fill',      label:'Broadcast'},
+    {id:'guide',   icon:'bi-book-fill',       label:'Setup Guide'},
+  ] as const
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)', gap: 0 }}>
+    <div style={{maxWidth:1400,margin:'0 auto'}}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes slideIn{from{opacity:0;transform:translateY(-6px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+        @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
+        ::-webkit-scrollbar{width:4px} ::-webkit-scrollbar-track{background:transparent} ::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:2px}
+      `}</style>
 
-      {/* ── Top bar ── */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '0 0 16px 0', flexShrink: 0 }}>
-        <div style={{ width: 40, height: 40, borderRadius: 10, background: `${WA_GREEN}22`, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <i className="bi bi-whatsapp" style={{ color: WA_GREEN, fontSize: 20 }} />
+      {/* Header */}
+      <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20,flexWrap:'wrap',gap:12}}>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <div style={{width:44,height:44,borderRadius:12,background:'rgba(37,211,102,0.15)',border:'1px solid rgba(37,211,102,0.3)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+            <i className="bi bi-whatsapp" style={{fontSize:22,color:G.waGreen}}/>
+          </div>
+          <div>
+            <h1 style={{margin:0,fontSize:22,fontWeight:800,color:G.text1,letterSpacing:'-0.5px'}}>WhatsApp</h1>
+            <p style={{margin:0,fontSize:12,color:G.text3}}>
+              {cfg?.status==='active'?<span style={{color:G.waGreen,fontWeight:600}}>● Connected · {cfg.phoneNumber}</span>:'Meta Cloud API — Real WhatsApp'}
+            </p>
+          </div>
         </div>
-        <div>
-          <div style={{ fontWeight: 800, fontSize: 18, color: 'var(--text)' }}>WhatsApp Cloud API</div>
-          {cfg?.phoneNumber && <div style={{ fontSize: 12, color: WA_GREEN }}>{cfg.phoneNumber} · {cfg.displayName}</div>}
-          {!isConfigured && !cfgLoading && <div style={{ fontSize: 12, color: 'var(--yellow)' }}>⚠ Not configured — see Setup tab</div>}
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-          {(['chat','setup','broadcast'] as const).map(t => (
-            <button key={t} onClick={() => setTab(t)}
-              style={{ padding: '6px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, fontWeight: 600,
-                background: tab === t ? WA_GREEN : 'var(--bg2)', color: tab === t ? '#000' : 'var(--text2)' }}>
-              {t === 'chat' ? '💬 Chat' : t === 'setup' ? '⚙️ Setup' : '📢 Broadcast'}
+        <div style={{display:'flex',gap:4,background:G.card,borderRadius:10,padding:4,border:`1px solid ${G.border}`}}>
+          {TABS.map(t=>(
+            <button key={t.id} onClick={()=>setTab(t.id)} style={{
+              display:'flex',alignItems:'center',gap:6,padding:'8px 14px',borderRadius:8,
+              fontSize:12,fontWeight:700,cursor:'pointer',transition:'all .2s',
+              background:tab===t.id?G.accentDim:'none',
+              border:tab===t.id?`1px solid ${G.accent}40`:'1px solid transparent',
+              color:tab===t.id?'#8b5cf6':G.text3,
+            }}>
+              <i className={`bi ${t.icon}`} style={{fontSize:12}}/>{t.label}
             </button>
           ))}
         </div>
       </div>
 
-      {/* ════════════════════════════════════════ SETUP TAB ═══════════════════════════════════════ */}
-      {tab === 'setup' && (
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', gap: 20, flexWrap: 'wrap', alignContent: 'flex-start' }}>
+      {msgAlert&&(
+        <div style={{padding:'11px 16px',borderRadius:10,marginBottom:16,fontSize:13,fontWeight:600,animation:'slideIn .2s ease',
+          background:msgAlert.ok?G.greenDim:G.redDim,color:msgAlert.ok?G.green:G.red,
+          border:`1px solid ${msgAlert.ok?'rgba(16,185,129,0.3)':'rgba(239,68,68,0.3)'}`}}>{msgAlert.text}</div>
+      )}
 
-          {/* Config form */}
-          <div style={{ flex: '1 1 380px', minWidth: 320, background: WA_PANEL, borderRadius: 16, padding: 24, border: `1px solid rgba(255,255,255,.06)` }}>
-            <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)', marginBottom: 6 }}>
-              <i className="bi bi-whatsapp" style={{ color: WA_GREEN }} /> Connect WhatsApp Cloud API
+      {/* ─── CHAT TAB ─── */}
+      {tab==='chat'&&(
+        <div style={{display:'flex',height:'calc(100vh - 200px)',minHeight:500,border:`1px solid ${G.border}`,borderRadius:14,overflow:'hidden',background:G.waPanel}}>
+          {/* Sidebar */}
+          <div style={{width:340,flexShrink:0,borderRight:`1px solid rgba(255,255,255,0.05)`,display:'flex',flexDirection:'column',background:'#1f2c34'}}>
+            {/* Search + Add */}
+            <div style={{padding:'14px 12px 10px',borderBottom:'1px solid rgba(255,255,255,0.05)'}}>
+              <div style={{display:'flex',gap:8,marginBottom:10}}>
+                <div style={{position:'relative',flex:1}}>
+                  <i className="bi bi-search" style={{position:'absolute',left:10,top:'50%',transform:'translateY(-50%)',color:G.text3,fontSize:12}}/>
+                  <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search contacts…"
+                    style={{...inp,background:'rgba(255,255,255,0.05)',border:'none',paddingLeft:32,fontSize:12}}/>
+                </div>
+                <button onClick={()=>setShowAdd(v=>!v)} style={{width:38,height:38,borderRadius:9,background:G.waGreen,border:'none',color:'#fff',cursor:'pointer',fontSize:16,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  <i className="bi bi-person-plus-fill"/>
+                </button>
+              </div>
+              {showAdd&&(
+                <div style={{background:'rgba(255,255,255,0.04)',borderRadius:10,padding:'12px',marginTop:4,animation:'slideIn .2s ease'}}>
+                  <input value={newC.name} onChange={e=>setNewC(p=>({...p,name:e.target.value}))} placeholder="Name (optional)"
+                    style={{...inp,background:'rgba(255,255,255,0.07)',border:'none',marginBottom:8,fontSize:12}}/>
+                  <input value={newC.phone} onChange={e=>setNewC(p=>({...p,phone:e.target.value}))} placeholder="+1234567890"
+                    style={{...inp,background:'rgba(255,255,255,0.07)',border:'none',marginBottom:8,fontFamily:'monospace',fontSize:12}}/>
+                  <button onClick={addContact} disabled={addingC} style={{width:'100%',padding:'8px',borderRadius:8,background:G.waGreen,border:'none',color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer'}}>
+                    {addingC?'Adding…':'Add Contact'}
+                  </button>
+                </div>
+              )}
             </div>
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginBottom: 20, lineHeight: 1.6 }}>
-              Get your credentials from <strong style={{ color: 'var(--text)' }}>Meta for Developers</strong> → Your App → WhatsApp → API Setup
-            </div>
-
-            {/* Step-by-step guide */}
-            <div style={{ marginBottom: 20, padding: '12px 14px', background: 'rgba(37,211,102,.06)', border: '1px solid rgba(37,211,102,.2)', borderRadius: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 700, color: WA_GREEN, marginBottom: 8 }}>📋 How to get credentials:</div>
-              {[
-                ['1.', 'Go to developers.facebook.com → My Apps → Create App → Business'],
-                ['2.', 'Add WhatsApp product to your app'],
-                ['3.', 'From WhatsApp → API Setup: copy Phone Number ID and Temporary Token'],
-                ['4.', 'From WhatsApp → Configuration: copy WhatsApp Business Account ID'],
-                ['5.', 'For permanent token: Meta Business Manager → System Users → Admin'],
-              ].map(([n, t]) => (
-                <div key={n} style={{ display: 'flex', gap: 8, fontSize: 11, color: 'var(--text2)', marginBottom: 4 }}>
-                  <span style={{ color: WA_GREEN, fontWeight: 700, flexShrink: 0 }}>{n}</span><span>{t}</span>
+            {/* Contact list */}
+            <div style={{flex:1,overflowY:'auto'}}>
+              {contacts.filter(c=>!search||(c.name||'').toLowerCase().includes(search.toLowerCase())||(c.phone||'').includes(search)).length===0?(
+                <div style={{padding:'40px 20px',textAlign:'center',color:G.text3,fontSize:13}}>
+                  <i className="bi bi-people" style={{fontSize:32,display:'block',marginBottom:12}}/>
+                  No contacts yet<br/>
+                  <span style={{fontSize:11}}>Add a contact or load numbers from iVASMS</span>
+                </div>
+              ):contacts.filter(c=>!search||(c.name||'').toLowerCase().includes(search.toLowerCase())||(c.phone||'').includes(search)).map(c=>(
+                <div key={c.id} onClick={()=>openContact(c)} style={{
+                  display:'flex',alignItems:'center',gap:12,padding:'12px 16px',cursor:'pointer',
+                  background:active?.id===c.id?'rgba(37,211,102,0.08)':'transparent',
+                  borderBottom:'1px solid rgba(255,255,255,0.03)',transition:'background .15s',
+                }}
+                onMouseEnter={e=>{if(active?.id!==c.id)(e.currentTarget as HTMLDivElement).style.background='rgba(255,255,255,0.03)'}}
+                onMouseLeave={e=>{if(active?.id!==c.id)(e.currentTarget as HTMLDivElement).style.background='transparent'}}
+                >
+                  <div style={{
+                    width:42,height:42,borderRadius:'50%',flexShrink:0,
+                    background:`${G.waGreen}20`,border:`2px solid ${active?.id===c.id?G.waGreen:'transparent'}`,
+                    display:'flex',alignItems:'center',justifyContent:'center',
+                    fontSize:14,fontWeight:800,color:G.waGreen,
+                    transition:'border .2s',
+                  }}>{(c.name||c.phone).slice(0,1).toUpperCase()}</div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:2}}>
+                      <span style={{fontSize:13,fontWeight:700,color:'#e9edef',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.name||c.phone}</span>
+                      {c.lastMessageAt&&<span style={{fontSize:10,color:G.text3,flexShrink:0}}>{new Date(c.lastMessageAt).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>}
+                    </div>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                      <span style={{fontSize:11,color:G.text3,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',flex:1}}>{c.lastMessage||c.phone}</span>
+                      {c.unread>0&&<span style={{fontSize:10,fontWeight:800,minWidth:18,height:18,borderRadius:'50%',background:G.waGreen,color:'#fff',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>{c.unread}</span>}
+                    </div>
+                  </div>
                 </div>
               ))}
             </div>
+          </div>
 
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 6 }}>Phone Number ID *</label>
-                <input style={{ width: '100%', background: WA_DARK, border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13, fontFamily: 'monospace', boxSizing: 'border-box' }}
-                  placeholder="e.g. 123456789012345"
-                  value={form.phoneId} onChange={e => setForm(p => ({ ...p, phoneId: e.target.value }))} />
+          {/* Chat area */}
+          {!active?(
+            <div style={{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',background:G.waBg,gap:16}}>
+              <div style={{width:80,height:80,borderRadius:'50%',background:'rgba(37,211,102,0.1)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <i className="bi bi-whatsapp" style={{fontSize:40,color:G.waGreen}}/>
               </div>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 6 }}>Access Token *</label>
-                <textarea style={{ width: '100%', background: WA_DARK, border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', minHeight: 80, boxSizing: 'border-box' }}
-                  placeholder="EAABsbCS... (permanent system user token recommended)"
-                  value={form.token} onChange={e => setForm(p => ({ ...p, token: e.target.value }))} />
+              <div style={{textAlign:'center'}}>
+                <h2 style={{margin:'0 0 8px',fontSize:20,fontWeight:700,color:'#e9edef'}}>DL WhatsApp</h2>
+                <p style={{margin:0,fontSize:13,color:G.text3,maxWidth:300}}>Select a contact to start chatting. Messages sent via Meta Cloud API are real WhatsApp messages.</p>
               </div>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 6 }}>WABA ID (WhatsApp Business Account ID)</label>
-                <input style={{ width: '100%', background: WA_DARK, border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13, fontFamily: 'monospace', boxSizing: 'border-box' }}
-                  placeholder="e.g. 987654321098765"
-                  value={form.wabaId} onChange={e => setForm(p => ({ ...p, wabaId: e.target.value }))} />
-              </div>
-
-              <button onClick={saveConfig} disabled={setupLoading}
-                style={{ padding: '12px 0', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 15,
-                  background: WA_GREEN, color: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <i className={`bi ${setupLoading ? 'bi-arrow-clockwise' : 'bi-plug-fill'}`}
-                  style={{ animation: setupLoading ? 'spin 1s linear infinite' : undefined }} />
-                {setupLoading ? 'Connecting…' : 'Connect to WhatsApp Cloud API'}
-              </button>
-
-              {setupResult && (
-                <div style={{ padding: '12px 14px', borderRadius: 10, fontSize: 12,
-                  background: setupResult.verified ? 'rgba(37,211,102,.08)' : 'rgba(255,82,82,.08)',
-                  border: `1px solid ${setupResult.verified ? 'rgba(37,211,102,.3)' : 'rgba(255,82,82,.3)'}`,
-                  color: setupResult.verified ? WA_GREEN : '#ff5252', lineHeight: 1.6 }}>
-                  <div style={{ fontWeight: 700, marginBottom: 4 }}>{setupResult.message || setupResult.error}</div>
-                  {setupResult.verified && (
-                    <div style={{ fontSize: 11, color: 'var(--text2)' }}>
-                      <div>📱 Number: {setupResult.phoneNumber}</div>
-                      <div>✅ Name: {setupResult.displayName}</div>
-                      <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(0,0,0,.3)', borderRadius: 6 }}>
-                        <div style={{ fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>🔗 Webhook URL (add to Meta):</div>
-                        <code style={{ fontSize: 11, color: WA_GREEN, wordBreak: 'break-all' }}>
-                          https://dl-sms-client.pages.dev/api/wa/webhook
-                        </code>
-                        <div style={{ marginTop: 4 }}>Verify Token: <code style={{ color: 'var(--yellow)' }}>{setupResult.webhookVerify}</code></div>
-                      </div>
-                    </div>
-                  )}
+              {cfg?.status!=='active'&&(
+                <div style={{padding:'12px 20px',borderRadius:10,background:'rgba(245,158,11,0.08)',border:'1px solid rgba(245,158,11,0.2)',fontSize:12,color:G.yellow,maxWidth:360,textAlign:'center',lineHeight:1.6}}>
+                  ⚠️ WhatsApp Cloud API not configured — messages will be saved locally only.<br/>
+                  <button onClick={()=>setTab('setup')} style={{background:'none',border:'none',color:G.yellow,fontWeight:700,cursor:'pointer',textDecoration:'underline',fontSize:12}}>Configure now →</button>
                 </div>
               )}
             </div>
-          </div>
-
-          {/* Current status */}
-          {isConfigured && cfg && (
-            <div style={{ flex: '1 1 280px', minWidth: 260 }}>
-              <div style={{ background: WA_PANEL, borderRadius: 16, padding: 20, border: '1px solid rgba(37,211,102,.2)', marginBottom: 16 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 }}>
-                  <div style={{ width: 10, height: 10, borderRadius: '50%', background: WA_GREEN, boxShadow: `0 0 8px ${WA_GREEN}` }} />
-                  <span style={{ fontWeight: 700, color: WA_GREEN }}>CONNECTED</span>
-                </div>
-                {[
-                  ['Phone Number', cfg.phoneNumber],
-                  ['Display Name', cfg.displayName],
-                  ['Phone ID', cfg.phoneId],
-                  ['WABA ID', cfg.wabaId || '—'],
-                  ['Token', cfg.tokenPreview],
-                  ['Webhook Verify', cfg.webhookVerify],
-                  ['Connected', cfg.configuredAt ? new Date(cfg.configuredAt).toLocaleDateString() : '—'],
-                ].map(([k, v]) => (
-                  <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,.04)', fontSize: 12 }}>
-                    <span style={{ color: 'var(--text3)' }}>{k}</span>
-                    <span style={{ color: 'var(--text)', fontFamily: 'monospace', maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v}</span>
+          ):(
+            <div style={{flex:1,display:'flex',flexDirection:'column',background:G.waBg}}>
+              {/* Thread header */}
+              <div style={{padding:'12px 20px',background:'#202c33',borderBottom:'1px solid rgba(255,255,255,0.05)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                <div style={{display:'flex',alignItems:'center',gap:12}}>
+                  <div style={{width:40,height:40,borderRadius:'50%',background:`${G.waGreen}20`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:800,color:G.waGreen}}>
+                    {(active.name||active.phone).slice(0,1).toUpperCase()}
                   </div>
-                ))}
-              </div>
-
-              {/* Webhook setup reminder */}
-              <div style={{ background: 'rgba(255,193,7,.06)', border: '1px solid rgba(255,193,7,.2)', borderRadius: 12, padding: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--yellow)', marginBottom: 8 }}>📌 Set webhook in Meta Dashboard:</div>
-                <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.7 }}>
-                  <div>URL: <code style={{ color: WA_GREEN, fontSize: 10 }}>https://dl-sms-client.pages.dev/api/wa/webhook</code></div>
-                  <div>Token: <code style={{ color: 'var(--yellow)', fontSize: 10 }}>{cfg.webhookVerify}</code></div>
-                  <div style={{ marginTop: 6 }}>Subscribe to: <strong>messages</strong></div>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700,color:'#e9edef'}}>{active.name||active.phone}</div>
+                    <div style={{fontSize:11,color:G.text3,fontFamily:'monospace'}}>{active.phone}</div>
+                  </div>
+                </div>
+                <div style={{display:'flex',gap:8}}>
+                  <button onClick={()=>copyText(active.phone,'phone')} style={{background:'rgba(255,255,255,0.05)',border:'none',color:G.text3,cursor:'pointer',padding:'6px 10px',borderRadius:7,fontSize:12}}>
+                    <i className={`bi ${copied==='phone'?'bi-check':'bi-copy'}`}/> {copied==='phone'?'Copied':'Copy #'}
+                  </button>
+                  {cfg?.status==='active'&&<span style={{fontSize:11,color:G.waGreen,fontWeight:600,padding:'4px 10px',borderRadius:20,background:'rgba(37,211,102,0.1)'}}>● Via Meta API</span>}
                 </div>
               </div>
-
-              {/* Phone numbers from Meta */}
-              {waNumbers.length > 0 && (
-                <div style={{ background: WA_PANEL, borderRadius: 12, padding: 14, marginTop: 16, border: '1px solid rgba(255,255,255,.06)' }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 10 }}>📱 Your WA Numbers</div>
-                  {waNumbers.map((n: any) => (
-                    <div key={n.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,.04)' }}>
-                      <span style={{ color: 'var(--text)' }}>{n.display_phone_number}</span>
-                      <span style={{ color: n.status === 'CONNECTED' ? WA_GREEN : 'var(--yellow)', fontSize: 11 }}>{n.status}</span>
+              {/* Messages */}
+              <div style={{flex:1,overflowY:'auto',padding:'16px 20px',display:'flex',flexDirection:'column',gap:4}}>
+                {thread.length===0&&(
+                  <div style={{textAlign:'center',color:G.text3,fontSize:12,margin:'auto',padding:'40px'}}>
+                    <i className="bi bi-lock" style={{fontSize:24,display:'block',marginBottom:8}}/>
+                    Messages are end-to-end encrypted<br/>
+                    <span style={{fontSize:11}}>Start the conversation</span>
+                  </div>
+                )}
+                {thread.map((m,i)=>{
+                  const isMe=m.from==='me'||!m.incoming
+                  return (
+                    <div key={m.id||i} style={{display:'flex',justifyContent:isMe?'flex-end':'flex-start'}}>
+                      <div style={{
+                        maxWidth:'70%',padding:'8px 12px',borderRadius:isMe?'12px 12px 4px 12px':'12px 12px 12px 4px',
+                        background:isMe?G.waMsg:'#202c33',
+                        boxShadow:'0 1px 2px rgba(0,0,0,0.3)',
+                      }}>
+                        <div style={{fontSize:13,color:'#e9edef',lineHeight:1.5,wordBreak:'break-word'}}>{m.body}</div>
+                        <div style={{fontSize:10,color:'rgba(255,255,255,0.45)',marginTop:4,display:'flex',alignItems:'center',gap:4,justifyContent:'flex-end'}}>
+                          {new Date(m.sent_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}
+                          {isMe&&<i className={`bi ${m.status==='sent'?'bi-check2-all':'bi-check2'}`} style={{color:m.via_cloud_api?'#53bdeb':'rgba(255,255,255,0.45)',fontSize:10}}/>}
+                        </div>
+                      </div>
                     </div>
-                  ))}
-                </div>
-              )}
+                  )
+                })}
+                <div ref={msgEndRef}/>
+              </div>
+              {/* Input */}
+              {sendErr&&<div style={{padding:'6px 16px',fontSize:11,color:G.yellow,background:'rgba(245,158,11,0.08)'}}>{sendErr}</div>}
+              <div style={{padding:'10px 16px',background:'#202c33',display:'flex',gap:10,alignItems:'center'}}>
+                <input
+                  value={msgInput}
+                  onChange={e=>setMsgInput(e.target.value)}
+                  onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMsg()}}}
+                  placeholder="Type a message…"
+                  style={{flex:1,padding:'10px 14px',borderRadius:24,background:'#2a3942',border:'none',color:'#e9edef',fontSize:13,outline:'none'}}
+                />
+                <button onClick={sendMsg} disabled={sending||!msgInput.trim()} style={{
+                  width:42,height:42,borderRadius:'50%',border:'none',cursor:sending?'not-allowed':'pointer',
+                  background:G.waGreen,color:'#fff',fontSize:16,display:'flex',alignItems:'center',justifyContent:'center',
+                  opacity:sending||!msgInput.trim()?0.6:1,transition:'all .2s',flexShrink:0,
+                }}>
+                  <i className={`bi ${sending?'bi-hourglass-split':'bi-send-fill'}`} style={{animation:sending?'spin .8s linear infinite':undefined}}/>
+                </button>
+              </div>
             </div>
           )}
         </div>
       )}
 
-      {/* ════════════════════════════════════════ CHAT TAB ════════════════════════════════════════ */}
-      {tab === 'chat' && (
-        <div style={{ flex: 1, display: 'flex', gap: 0, minHeight: 0, borderRadius: 16, overflow: 'hidden', border: '1px solid rgba(255,255,255,.06)' }}>
-
-          {/* Left sidebar — contacts */}
-          <div style={{ width: 320, flexShrink: 0, background: WA_PANEL, borderRight: '1px solid rgba(255,255,255,.06)', display: 'flex', flexDirection: 'column' }}>
-            {/* Search + add */}
-            <div style={{ padding: '12px 10px', display: 'flex', gap: 8 }}>
-              <div style={{ flex: 1, position: 'relative' }}>
-                <i className="bi bi-search" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text3)', fontSize: 13 }} />
-                <input style={{ width: '100%', paddingLeft: 32, paddingRight: 10, height: 36, borderRadius: 8, border: 'none', background: WA_DARK, color: 'var(--text)', fontSize: 13, boxSizing: 'border-box' }}
-                  placeholder="Search contacts…" value={search} onChange={e => setSearch(e.target.value)} />
+      {/* ─── SETUP TAB ─── */}
+      {tab==='setup'&&(
+        <div style={{maxWidth:700}}>
+          {cfg?.status==='active'&&(
+            <div style={{padding:'14px 18px',borderRadius:12,marginBottom:20,background:G.greenDim,border:`1px solid rgba(37,211,102,0.3)`,display:'flex',alignItems:'center',gap:12}}>
+              <i className="bi bi-check-circle-fill" style={{fontSize:18,color:G.waGreen}}/>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:G.waGreen}}>WhatsApp Connected!</div>
+                <div style={{fontSize:12,color:G.text2}}>Number: <strong>{cfg.phoneNumber}</strong> · Display: <strong>{cfg.displayName}</strong></div>
               </div>
-              <button onClick={() => setShowAddContact(true)}
-                style={{ width: 36, height: 36, borderRadius: 8, border: 'none', background: `${WA_GREEN}22`, color: WA_GREEN, cursor: 'pointer', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>+</button>
+              <button onClick={()=>setTab('chat')} style={{marginLeft:'auto',padding:'8px 16px',borderRadius:9,background:G.waGreen,border:'none',color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer'}}>Open Chat →</button>
+            </div>
+          )}
+
+          <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:14,padding:'22px',marginBottom:16}}>
+            <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:20,paddingBottom:14,borderBottom:`1px solid ${G.border}`}}>
+              <div style={{width:36,height:36,borderRadius:10,background:'rgba(37,211,102,0.12)',display:'flex',alignItems:'center',justifyContent:'center'}}>
+                <i className="bi bi-whatsapp" style={{fontSize:18,color:G.waGreen}}/>
+              </div>
+              <div>
+                <div style={{fontSize:14,fontWeight:700,color:G.text1}}>Meta WhatsApp Cloud API</div>
+                <div style={{fontSize:11,color:G.text3}}>Connect your real WhatsApp Business account</div>
+              </div>
             </div>
 
-            {/* API status bar */}
-            {!isConfigured && (
-              <div style={{ margin: '0 10px 8px', padding: '8px 10px', background: 'rgba(255,193,7,.08)', border: '1px solid rgba(255,193,7,.2)', borderRadius: 8, fontSize: 11, color: 'var(--yellow)' }}>
-                ⚠ WA Cloud API not set up — messages stored locally only.{' '}
-                <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setTab('setup')}>Setup →</span>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:14,marginBottom:14}}>
+              <div>
+                <Label c="Phone Number ID"/>
+                <input style={inp} value={form.phoneId} onChange={e=>setForm(p=>({...p,phoneId:e.target.value}))} placeholder="1234567890123456"/>
+                <div style={{fontSize:10,color:G.text3,marginTop:4}}>From Meta Business → Phone Numbers</div>
               </div>
-            )}
-
-            {/* Contact list */}
-            <div style={{ flex: 1, overflowY: 'auto' }}>
-              {filtered.length === 0 && (
-                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 13 }}>
-                  {search ? 'No contacts found' : 'No contacts yet'}<br />
-                  <span style={{ fontSize: 11 }}>Sync numbers first or add manually</span>
-                </div>
-              )}
-              {filtered.map(c => (
-                <div key={c.id} onClick={() => openContact(c)}
-                  style={{ display: 'flex', gap: 10, padding: '10px 12px', cursor: 'pointer', borderBottom: '1px solid rgba(255,255,255,.03)',
-                    background: active?.id === c.id ? 'rgba(37,211,102,.08)' : 'transparent',
-                    transition: 'background .15s' }}
-                  onMouseEnter={e => { if (active?.id !== c.id)(e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,.04)' }}
-                  onMouseLeave={e => { if (active?.id !== c.id)(e.currentTarget as HTMLElement).style.background = 'transparent' }}>
-                  {/* Avatar */}
-                  <div style={{ width: 44, height: 44, borderRadius: '50%', background: `hsl(${Math.abs(c.name.charCodeAt(0)*37)%360},40%,35%)`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, flexShrink: 0, color: '#fff' }}>
-                    {c.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
-                      <span style={{ fontWeight: 600, fontSize: 14, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.name}</span>
-                      <span style={{ fontSize: 11, color: 'var(--text3)', flexShrink: 0 }}>{c.lastMessageAt ? fmt(c.lastMessageAt) : ''}</span>
-                    </div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                      <span style={{ fontSize: 12, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 }}>
-                        {c.phone}
-                      </span>
-                      {c.unread > 0 && (
-                        <span style={{ background: WA_GREEN, color: '#000', borderRadius: '50%', minWidth: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 700, flexShrink: 0 }}>{c.unread}</span>
-                      )}
-                    </div>
-                    {c.lastMessage && <div style={{ fontSize: 11, color: 'var(--text3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.lastMessage}</div>}
-                  </div>
-                </div>
-              ))}
+              <div>
+                <Label c="WhatsApp Business Account ID"/>
+                <input style={inp} value={form.wabaId} onChange={e=>setForm(p=>({...p,wabaId:e.target.value}))} placeholder="9876543210987654"/>
+                <div style={{fontSize:10,color:G.text3,marginTop:4}}>From Meta Business Manager</div>
+              </div>
             </div>
-          </div>
+            <div style={{marginBottom:14}}>
+              <Label c="Permanent Access Token"/>
+              <input style={{...inp,fontFamily:'monospace',fontSize:11}} value={form.token} onChange={e=>setForm(p=>({...p,token:e.target.value}))} type="password" placeholder="EAAxxxxxx... (System User token from Meta)"/>
+              <div style={{fontSize:10,color:G.text3,marginTop:4}}>Create a System User in Meta Business → Assign assets → Generate token</div>
+            </div>
 
-          {/* Right — chat panel */}
-          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', background: WA_DARK, minWidth: 0 }}>
-            {!active ? (
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', gap: 12 }}>
-                <i className="bi bi-whatsapp" style={{ fontSize: 56, color: `${WA_GREEN}44` }} />
-                <div style={{ fontSize: 16, fontWeight: 600 }}>Select a contact to start chatting</div>
-                <div style={{ fontSize: 12 }}>
-                  {isConfigured ? `Connected: ${cfg?.phoneNumber}` : 'Configure WhatsApp Cloud API in Setup tab to send real messages'}
+            <button onClick={setupWA} disabled={setupLoading||!form.phoneId||!form.token} style={{
+              display:'flex',alignItems:'center',gap:8,padding:'11px 22px',borderRadius:10,
+              background:`linear-gradient(135deg, ${G.waGreen}, #1da851)`,
+              border:'none',color:'#fff',fontSize:13,fontWeight:700,cursor:setupLoading?'not-allowed':'pointer',
+              opacity:setupLoading||!form.phoneId||!form.token?0.7:1,
+              boxShadow:'0 4px 14px rgba(37,211,102,0.3)',
+            }}>
+              <i className={`bi ${setupLoading?'bi-arrow-repeat':'bi-whatsapp'}`} style={{animation:setupLoading?'spin .8s linear infinite':undefined}}/>
+              {setupLoading?'Verifying…':'Connect WhatsApp'}
+            </button>
+
+            {setupResult&&(
+              <div style={{marginTop:14,padding:'14px 16px',borderRadius:10,animation:'slideIn .2s ease',
+                background:setupResult.verified?G.greenDim:G.yellowDim,
+                border:`1px solid ${setupResult.verified?'rgba(37,211,102,0.3)':'rgba(245,158,11,0.3)'}`}}>
+                <div style={{fontSize:13,fontWeight:700,color:setupResult.verified?G.waGreen:G.yellow,marginBottom:6}}>
+                  {setupResult.verified?'✅ Connected Successfully!':setupResult.error?'❌ Error':' ⚠️ Saved — Check Details'}
                 </div>
-              </div>
-            ) : (
-              <>
-                {/* Chat header */}
-                <div style={{ padding: '12px 16px', background: WA_PANEL, display: 'flex', alignItems: 'center', gap: 12, borderBottom: '1px solid rgba(255,255,255,.06)', flexShrink: 0 }}>
-                  <div style={{ width: 38, height: 38, borderRadius: '50%', background: `hsl(${Math.abs(active.name.charCodeAt(0)*37)%360},40%,35%)`,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16, color: '#fff' }}>
-                    {active.name.charAt(0).toUpperCase()}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: 14, color: 'var(--text)' }}>{active.name}</div>
-                    <div style={{ fontSize: 12, color: 'var(--text3)' }}>{active.phone}</div>
-                  </div>
-                  {isConfigured && (
-                    <div style={{ marginLeft: 'auto', fontSize: 11, color: WA_GREEN, display: 'flex', alignItems: 'center', gap: 4 }}>
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: WA_GREEN, display: 'inline-block' }} />
-                      Real WA Cloud API
+                <div style={{fontSize:12,color:G.text2,lineHeight:1.7}}>{setupResult.message||setupResult.error||''}</div>
+                {setupResult.verified&&(
+                  <div style={{marginTop:10,padding:'10px 14px',borderRadius:9,background:'rgba(0,0,0,0.2)',fontSize:12}}>
+                    <div style={{fontWeight:700,color:G.text1,marginBottom:6}}>📋 Configure Webhook in Meta:</div>
+                    <div style={{marginBottom:4,color:G.text3}}>Webhook URL:</div>
+                    <div style={{display:'flex',gap:8,alignItems:'center'}}>
+                      <code style={{flex:1,fontSize:11,color:G.waGreen,fontFamily:'monospace',wordBreak:'break-all'}}>https://dl-sms-client.pages.dev/api/wa/webhook</code>
+                      <button onClick={()=>copyText('https://dl-sms-client.pages.dev/api/wa/webhook','wh')} style={{padding:'4px 10px',borderRadius:6,background:G.card2,border:`1px solid ${G.border2}`,color:copied==='wh'?G.green:G.text3,fontSize:11,cursor:'pointer',flexShrink:0}}>
+                        {copied==='wh'?'✓':'Copy'}
+                      </button>
                     </div>
-                  )}
-                </div>
-
-                {/* Messages */}
-                <div style={{ flex: 1, overflowY: 'auto', padding: '16px 16px', display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {thread.length === 0 && (
-                    <div style={{ textAlign: 'center', color: 'var(--text3)', fontSize: 12, margin: 'auto' }}>
-                      No messages yet. Send a message to start the conversation.
-                    </div>
-                  )}
-                  {thread.map(msg => {
-                    const isMe = msg.from === 'me' || !msg.incoming
-                    return (
-                      <div key={msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start' }}>
-                        <div style={{
-                          maxWidth: '72%', padding: '8px 12px 4px', borderRadius: isMe ? '12px 12px 0 12px' : '12px 12px 12px 0',
-                          background: isMe ? WA_MSG : WA_PANEL, position: 'relative',
-                          border: `1px solid ${isMe ? 'rgba(0,92,75,.3)' : 'rgba(255,255,255,.04)'}`,
-                        }}>
-                          <div style={{ fontSize: 14, color: '#e9edef', wordBreak: 'break-word', lineHeight: 1.5 }}>{msg.body}</div>
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'flex-end', marginTop: 2 }}>
-                            <span style={{ fontSize: 10, color: 'rgba(255,255,255,.4)' }}>{new Date(msg.sent_at).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}</span>
-                            {isMe && (
-                              <span style={{ fontSize: 12 }}>
-                                {msg.via_cloud_api ? <span style={{ color: WA_GREEN }}>✓✓</span> : <span style={{ color: 'rgba(255,255,255,.4)' }}>✓</span>}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    )
-                  })}
-                  <div ref={msgEndRef} />
-                </div>
-
-                {/* Send error */}
-                {sendError && (
-                  <div style={{ padding: '8px 16px', background: 'rgba(255,82,82,.1)', color: '#ff5252', fontSize: 12, textAlign: 'center' }}>
-                    ❌ {sendError}
+                    <div style={{marginTop:6,color:G.text3}}>Verify Token: <code style={{color:G.yellow,fontFamily:'monospace'}}>{setupResult.webhookVerify||cfg?.webhookVerify}</code></div>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
 
-                {/* Input bar */}
-                <div style={{ padding: '10px 12px', background: WA_PANEL, display: 'flex', gap: 8, alignItems: 'center', flexShrink: 0 }}>
-                  <input ref={inputRef}
-                    style={{ flex: 1, background: WA_DARK, border: 'none', borderRadius: 24, padding: '10px 16px', color: 'var(--text)', fontSize: 14, outline: 'none' }}
-                    placeholder={isConfigured ? `Message ${active.name}…` : 'Type message (no WA API configured)…'}
-                    value={msgInput}
-                    onChange={e => setMsgInput(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage() } }} />
-                  <button onClick={sendMessage} disabled={sending || !msgInput.trim()}
-                    style={{ width: 44, height: 44, borderRadius: '50%', border: 'none', cursor: 'pointer',
-                      background: msgInput.trim() ? WA_GREEN : 'rgba(255,255,255,.1)',
-                      color: msgInput.trim() ? '#000' : 'var(--text3)', fontSize: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .2s' }}>
-                    <i className={`bi ${sending ? 'bi-arrow-clockwise' : 'bi-send-fill'}`}
-                      style={{ animation: sending ? 'spin 1s linear infinite' : undefined }} />
-                  </button>
+          {/* Webhook info */}
+          {cfg?.webhookVerify&&(
+            <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:14,padding:'18px 22px'}}>
+              <div style={{fontSize:13,fontWeight:700,color:G.text1,marginBottom:14}}>📡 Webhook Configuration</div>
+              <div style={{display:'grid',gap:10}}>
+                <div>
+                  <Label c="Webhook URL (paste in Meta)"/>
+                  <div style={{display:'flex',gap:8}}>
+                    <input style={{...inp,fontFamily:'monospace',fontSize:11,color:G.waGreen}} value="https://dl-sms-client.pages.dev/api/wa/webhook" readOnly/>
+                    <button onClick={()=>copyText('https://dl-sms-client.pages.dev/api/wa/webhook','wh2')} style={{padding:'10px 14px',borderRadius:10,background:G.card2,border:`1px solid ${G.border2}`,color:copied==='wh2'?G.green:G.text3,cursor:'pointer',fontSize:13,flexShrink:0}}>
+                      <i className={`bi ${copied==='wh2'?'bi-check':'bi-copy'}`}/>
+                    </button>
+                  </div>
                 </div>
-              </>
+                <div>
+                  <Label c="Verify Token"/>
+                  <div style={{display:'flex',gap:8}}>
+                    <input style={{...inp,fontFamily:'monospace',fontSize:12,color:G.yellow}} value={cfg.webhookVerify} readOnly/>
+                    <button onClick={()=>copyText(cfg.webhookVerify,'vt')} style={{padding:'10px 14px',borderRadius:10,background:G.card2,border:`1px solid ${G.border2}`,color:copied==='vt'?G.green:G.text3,cursor:'pointer',fontSize:13,flexShrink:0}}>
+                      <i className={`bi ${copied==='vt'?'bi-check':'bi-copy'}`}/>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ─── BROADCAST TAB ─── */}
+      {tab==='broadcast'&&(
+        <div style={{maxWidth:700}}>
+          {cfg?.status!=='active'&&(
+            <div style={{padding:'12px 16px',borderRadius:10,marginBottom:16,background:G.yellowDim,border:`1px solid rgba(245,158,11,0.3)`,fontSize:12,color:G.yellow}}>
+              ⚠️ WhatsApp Cloud API not configured — broadcast will be saved locally only.
+              <button onClick={()=>setTab('setup')} style={{background:'none',border:'none',color:G.yellow,fontWeight:700,cursor:'pointer',textDecoration:'underline',marginLeft:6}}>Setup →</button>
+            </div>
+          )}
+          <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:14,padding:'22px'}}>
+            <div style={{fontSize:14,fontWeight:700,color:G.text1,marginBottom:16,display:'flex',alignItems:'center',gap:8}}>
+              <i className="bi bi-send-fill" style={{color:G.waGreen}}/>
+              Send Broadcast Message
+            </div>
+            <div style={{marginBottom:14}}>
+              <Label c="Phone Numbers (one per line)"/>
+              <textarea value={bcNums} onChange={e=>setBcNums(e.target.value)} rows={6}
+                placeholder={"+1234567890\n+447700900123\n+4915112345678"}
+                style={{...inp,resize:'vertical' as const,fontFamily:'monospace',fontSize:12}}/>
+              <div style={{fontSize:10,color:G.text3,marginTop:4}}>{bcNums.split('\n').filter(s=>s.trim()).length} numbers · max 50</div>
+            </div>
+            <div style={{marginBottom:14}}>
+              <Label c="Message"/>
+              <textarea value={bcMsg} onChange={e=>setBcMsg(e.target.value)} rows={4}
+                placeholder="Type your broadcast message…"
+                style={{...inp,resize:'vertical' as const}}/>
+              <div style={{fontSize:10,color:G.text3,marginTop:4}}>{bcMsg.length} characters</div>
+            </div>
+            <button onClick={sendBroadcast} disabled={bcSending||!bcMsg.trim()||!bcNums.trim()} style={{
+              display:'flex',alignItems:'center',gap:8,padding:'11px 22px',borderRadius:10,
+              background:`linear-gradient(135deg, ${G.waGreen}, #1da851)`,
+              border:'none',color:'#fff',fontSize:13,fontWeight:700,cursor:bcSending?'not-allowed':'pointer',
+              opacity:bcSending?0.7:1,boxShadow:'0 4px 14px rgba(37,211,102,0.25)',
+            }}>
+              <i className={`bi ${bcSending?'bi-arrow-repeat':'bi-send-fill'}`} style={{animation:bcSending?'spin .8s linear infinite':undefined}}/>
+              {bcSending?'Sending…':`Send to ${bcNums.split('\n').filter(s=>s.trim()).length} numbers`}
+            </button>
+            {bcResult&&(
+              <div style={{marginTop:14,padding:'14px',borderRadius:10,background:G.card2,border:`1px solid ${G.border}`,animation:'slideIn .2s ease'}}>
+                {bcResult.error?<div style={{color:G.red,fontSize:13}}>{bcResult.error}</div>:(
+                  <>
+                    <div style={{fontSize:13,fontWeight:700,color:G.text1,marginBottom:10}}>
+                      ✅ Sent: {bcResult.sent} · ❌ Failed: {bcResult.failed}
+                    </div>
+                    <div style={{maxHeight:200,overflowY:'auto',display:'flex',flexDirection:'column',gap:4}}>
+                      {bcResult.results?.map((r:any,i:number)=>(
+                        <div key={i} style={{fontSize:11,color:r.ok?G.green:G.red,fontFamily:'monospace'}}>{r.ok?'✓':'✗'} {r.phone} {r.error?`(${r.error})`:''}</div>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
             )}
           </div>
         </div>
       )}
 
-      {/* ═══════════════════════════════════════ BROADCAST TAB ════════════════════════════════════ */}
-      {tab === 'broadcast' && (
-        <div style={{ flex: 1, overflowY: 'auto', display: 'flex', gap: 20, flexWrap: 'wrap', alignContent: 'flex-start' }}>
-          <div style={{ flex: '1 1 380px', background: WA_PANEL, borderRadius: 16, padding: 24, border: '1px solid rgba(255,255,255,.06)' }}>
-            <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)', marginBottom: 16 }}>
-              📢 Broadcast via WhatsApp Cloud API
+      {/* ─── GUIDE TAB ─── */}
+      {tab==='guide'&&(
+        <div style={{maxWidth:720}}>
+          <div style={{background:G.card,border:`1px solid ${G.border}`,borderRadius:14,padding:'24px',marginBottom:16}}>
+            <div style={{fontSize:16,fontWeight:800,color:G.text1,marginBottom:4,display:'flex',alignItems:'center',gap:10}}>
+              <i className="bi bi-whatsapp" style={{color:G.waGreen}}/>
+              How to Connect Real WhatsApp
             </div>
-            {!isConfigured && (
-              <div style={{ padding: '12px 14px', background: 'rgba(255,193,7,.06)', border: '1px solid rgba(255,193,7,.2)', borderRadius: 8, fontSize: 12, color: 'var(--yellow)', marginBottom: 16 }}>
-                ⚠ Configure WhatsApp Cloud API in Setup tab first
-              </div>
-            )}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 6 }}>Template Name</label>
-                <select style={{ width: '100%', background: WA_DARK, border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13 }}
-                  value={bcTemplate} onChange={e => setBcTemplate(e.target.value)}>
-                  <option value="">Select template…</option>
-                  {templates.map((t: any) => <option key={t.name || t} value={t.name || t}>{t.name || t} ({t.status || 'approved'})</option>)}
-                  <option value="hello_world">hello_world (default test)</option>
-                </select>
-              </div>
-              <div>
-                <label style={{ fontSize: 11, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: 1, display: 'block', marginBottom: 6 }}>Recipients (one per line)</label>
-                <textarea style={{ width: '100%', background: WA_DARK, border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 12, fontFamily: 'monospace', resize: 'vertical', minHeight: 100, boxSizing: 'border-box' }}
-                  placeholder={"+1234567890\n+9876543210\n..."}
-                  value={bcNumbers} onChange={e => setBcNumbers(e.target.value)} />
-              </div>
-              <button onClick={sendBroadcast} disabled={bcSending || !isConfigured}
-                style={{ padding: '12px 0', borderRadius: 10, border: 'none', cursor: 'pointer', fontWeight: 800, fontSize: 15,
-                  background: isConfigured ? WA_GREEN : 'var(--bg2)', color: isConfigured ? '#000' : 'var(--text3)',
-                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-                <i className={`bi ${bcSending ? 'bi-arrow-clockwise' : 'bi-broadcast'}`}
-                  style={{ animation: bcSending ? 'spin 1s linear infinite' : undefined }} />
-                {bcSending ? 'Sending…' : 'Send Broadcast'}
-              </button>
-              {bcResult && (
-                <div style={{ padding: '12px 14px', borderRadius: 8, fontSize: 12,
-                  background: bcResult.error ? 'rgba(255,82,82,.08)' : 'rgba(37,211,102,.08)',
-                  border: `1px solid ${bcResult.error ? 'rgba(255,82,82,.3)' : 'rgba(37,211,102,.3)'}`,
-                  color: bcResult.error ? '#ff5252' : WA_GREEN }}>
-                  {bcResult.error ? bcResult.error : `✅ Sent: ${bcResult.sent}/${bcResult.total} · Failed: ${bcResult.failed}`}
+            <div style={{fontSize:12,color:G.text3,marginBottom:24}}>Step-by-step guide to connect your WhatsApp Business number via Meta Cloud API</div>
+            {[
+              {n:'1', title:'Create Meta Business Account', icon:'bi-meta', color:'#1877f2', steps:[
+                'Go to business.facebook.com and create/login to your account',
+                'Complete business verification (name, address, etc.)',
+                'Go to Settings → Business Settings',
+              ]},
+              {n:'2', title:'Create WhatsApp App', icon:'bi-code-square', color:'#e50914', steps:[
+                'Go to developers.facebook.com → Create App',
+                'Select "Business" app type',
+                'Add "WhatsApp" product to your app',
+                'This creates your WABA (WhatsApp Business Account)',
+              ]},
+              {n:'3', title:'Add Phone Number', icon:'bi-phone-fill', color:G.waGreen, steps:[
+                'In Meta Developers → WhatsApp → Getting Started',
+                'Add a phone number (can be any number that can receive SMS/calls)',
+                'Verify the number via SMS or voice call',
+                'Copy the Phone Number ID shown on screen',
+              ]},
+              {n:'4', title:'Generate Permanent Token', icon:'bi-key-fill', color:G.yellow, steps:[
+                'Go to Business Settings → System Users → Add System User (Admin role)',
+                'Click "Generate New Token" → Select your WhatsApp app',
+                'Permissions needed: whatsapp_business_messaging, whatsapp_business_management',
+                'Copy the token (save it — shown only once!)',
+              ]},
+              {n:'5', title:'Configure Here + Set Webhook', icon:'bi-gear-fill', color:G.accent, steps:[
+                'Paste Phone Number ID, WABA ID, and token in the Setup tab',
+                'Click "Connect WhatsApp" — you\'ll get your Webhook URL',
+                'In Meta Developers → WhatsApp → Configuration → Set webhook URL',
+                'Subscribe to: messages, message_deliveries, messaging_postbacks',
+              ]},
+            ].map(step=>(
+              <div key={step.n} style={{display:'flex',gap:16,marginBottom:24}}>
+                <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:8}}>
+                  <div style={{width:36,height:36,borderRadius:'50%',background:`${step.color}20`,border:`2px solid ${step.color}40`,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
+                    <i className={`bi ${step.icon}`} style={{fontSize:14,color:step.color}}/>
+                  </div>
+                  <div style={{width:2,flex:1,background:`linear-gradient(${step.color}30, transparent)`}}/>
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* ── Add Contact Modal ── */}
-      {showAddContact && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
-          <div style={{ background: WA_PANEL, borderRadius: 16, padding: 24, width: 340, border: '1px solid rgba(255,255,255,.1)' }}>
-            <div style={{ fontWeight: 800, fontSize: 16, color: 'var(--text)', marginBottom: 16 }}>Add WhatsApp Contact</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <input style={{ background: WA_DARK, border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13 }}
-                placeholder="Name (optional)" value={newContact.name} onChange={e => setNewContact(p => ({ ...p, name: e.target.value }))} />
-              <input style={{ background: WA_DARK, border: '1px solid rgba(255,255,255,.1)', borderRadius: 8, padding: '10px 12px', color: 'var(--text)', fontSize: 13 }}
-                placeholder="Phone number e.g. +14155552671" value={newContact.phone}
-                onChange={e => setNewContact(p => ({ ...p, phone: e.target.value }))}
-                onKeyDown={e => { if (e.key === 'Enter') addContact() }} />
-              <div style={{ display: 'flex', gap: 10 }}>
-                <button onClick={() => setShowAddContact(false)} style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: '1px solid rgba(255,255,255,.1)', background: 'transparent', color: 'var(--text2)', cursor: 'pointer' }}>Cancel</button>
-                <button onClick={addContact} disabled={addingContact || !newContact.phone}
-                  style={{ flex: 1, padding: '10px 0', borderRadius: 8, border: 'none', background: WA_GREEN, color: '#000', fontWeight: 700, cursor: 'pointer' }}>
-                  {addingContact ? 'Adding…' : 'Add Contact'}
-                </button>
+                <div style={{flex:1,paddingBottom:8}}>
+                  <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:10}}>
+                    <span style={{fontSize:10,fontWeight:800,padding:'2px 8px',borderRadius:20,background:`${step.color}20`,color:step.color,border:`1px solid ${step.color}30`}}>Step {step.n}</span>
+                    <span style={{fontSize:14,fontWeight:700,color:G.text1}}>{step.title}</span>
+                  </div>
+                  <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                    {step.steps.map((s,i)=>(
+                      <div key={i} style={{display:'flex',gap:8,alignItems:'flex-start',fontSize:12,color:G.text2,lineHeight:1.6}}>
+                        <span style={{color:step.color,flexShrink:0,marginTop:2}}>→</span>
+                        {s}
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
+            ))}
+            <div style={{padding:'14px 16px',borderRadius:10,background:'rgba(37,211,102,0.06)',border:'1px solid rgba(37,211,102,0.2)',fontSize:12,color:G.text2}}>
+              <strong style={{color:G.waGreen}}>Free Tier:</strong> Meta gives 1,000 free conversations/month. After that, pay-per-conversation.
+              Business Verification is required for more than 250 messages/day.
             </div>
           </div>
+          <button onClick={()=>setTab('setup')} style={{
+            padding:'11px 22px',borderRadius:10,background:`linear-gradient(135deg,${G.waGreen},#1da851)`,
+            border:'none',color:'#fff',fontSize:13,fontWeight:700,cursor:'pointer',
+            boxShadow:'0 4px 14px rgba(37,211,102,0.3)',display:'flex',alignItems:'center',gap:8,
+          }}>
+            <i className="bi bi-gear-fill"/>
+            Go to Setup →
+          </button>
         </div>
       )}
     </div>
