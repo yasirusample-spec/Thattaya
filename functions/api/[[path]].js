@@ -1,6 +1,7 @@
-// Cloudflare Pages Functions - Full API handler v4
+// Cloudflare Pages Functions - Full API handler v5 — REAL DATA ONLY
 // DL SMS Client — Team Death Legion
-// WebCrypto JWT · KV/in-memory store · iVASMS real scraper + seed data · 60+ endpoints
+// WebCrypto JWT · KV store · iVASMS real scraper · Meta WhatsApp Cloud API
+// NO FAKE/SEED DATA — all data is real or empty
 
 // ─── Tiny JWT (HS256 via WebCrypto) ────────────────────────────────────────
 async function signJWT(payload, secret) {
@@ -72,127 +73,6 @@ function uuid() { return crypto.randomUUID() }
 // ─── Default credentials ──────────────────────────────────────────────────
 const DEFAULT_IVASMS_EMAIL    = 'ohlivvy53@gmail.com'
 const DEFAULT_IVASMS_PASSWORD = 'AAQidas123@'
-
-// ─── SEED DATA — Real-looking numbers from iVASMS account ────────────────────
-// These are injected when no real scrape has happened yet
-function generateSeedNumbers(userId) {
-  const pool = [
-    { phone: '+12025551847', country: 'US', country_name: 'United States',  ivasms_id: '10041' },
-    { phone: '+12015553921', country: 'US', country_name: 'United States',  ivasms_id: '10042' },
-    { phone: '+14155558823', country: 'US', country_name: 'United States',  ivasms_id: '10043' },
-    { phone: '+13105552267', country: 'US', country_name: 'United States',  ivasms_id: '10044' },
-    { phone: '+17185559034', country: 'US', country_name: 'United States',  ivasms_id: '10045' },
-    { phone: '+19175551122', country: 'US', country_name: 'United States',  ivasms_id: '10046' },
-    { phone: '+12125556789', country: 'US', country_name: 'United States',  ivasms_id: '10047' },
-    { phone: '+16175553344', country: 'US', country_name: 'United States',  ivasms_id: '10048' },
-    { phone: '+17025558801', country: 'US', country_name: 'United States',  ivasms_id: '10049' },
-    { phone: '+14085551456', country: 'US', country_name: 'United States',  ivasms_id: '10050' },
-    { phone: '+447911123456', country: 'GB', country_name: 'United Kingdom', ivasms_id: '10051' },
-    { phone: '+447700900123', country: 'GB', country_name: 'United Kingdom', ivasms_id: '10052' },
-    { phone: '+447911456789', country: 'GB', country_name: 'United Kingdom', ivasms_id: '10053' },
-    { phone: '+4915112345678', country: 'DE', country_name: 'Germany',       ivasms_id: '10054' },
-    { phone: '+4915198765432', country: 'DE', country_name: 'Germany',       ivasms_id: '10055' },
-    { phone: '+33612345678',   country: 'FR', country_name: 'France',        ivasms_id: '10056' },
-    { phone: '+33698765432',   country: 'FR', country_name: 'France',        ivasms_id: '10057' },
-    { phone: '+79161234567',   country: 'RU', country_name: 'Russia',        ivasms_id: '10058' },
-    { phone: '+79031234567',   country: 'RU', country_name: 'Russia',        ivasms_id: '10059' },
-    { phone: '+91981234567',   country: 'IN', country_name: 'India',         ivasms_id: '10060' },
-    { phone: '+91987654321',   country: 'IN', country_name: 'India',         ivasms_id: '10061' },
-    { phone: '+8613812345678', country: 'CN', country_name: 'China',         ivasms_id: '10062' },
-    { phone: '+5511987654321', country: 'BR', country_name: 'Brazil',        ivasms_id: '10063' },
-    { phone: '+16472345678',   country: 'CA', country_name: 'Canada',        ivasms_id: '10064' },
-    { phone: '+61412345678',   country: 'AU', country_name: 'Australia',     ivasms_id: '10065' },
-    { phone: '+81901234567',   country: 'JP', country_name: 'Japan',         ivasms_id: '10066' },
-    { phone: '+46701234567',   country: 'SE', country_name: 'Sweden',        ivasms_id: '10067' },
-    { phone: '+31612345678',   country: 'NL', country_name: 'Netherlands',   ivasms_id: '10068' },
-    { phone: '+48501234567',   country: 'PL', country_name: 'Poland',        ivasms_id: '10069' },
-    { phone: '+380501234567',  country: 'UA', country_name: 'Ukraine',       ivasms_id: '10070' },
-    { phone: '+66812345678',   country: 'TH', country_name: 'Thailand',      ivasms_id: '10071' },
-    { phone: '+62812345678',   country: 'ID', country_name: 'Indonesia',     ivasms_id: '10072' },
-    { phone: '+60112345678',   country: 'MY', country_name: 'Malaysia',      ivasms_id: '10073' },
-    { phone: '+639171234567',  country: 'PH', country_name: 'Philippines',   ivasms_id: '10074' },
-    { phone: '+841234567890',  country: 'VN', country_name: 'Vietnam',       ivasms_id: '10075' },
-    { phone: '+905301234567',  country: 'TR', country_name: 'Turkey',        ivasms_id: '10076' },
-  ]
-  const now = Date.now()
-  return pool.map((p, i) => ({
-    id:               uuid(),
-    user_id:          userId,
-    ivasms_id:        p.ivasms_id,
-    phone:            p.phone,
-    country:          p.country,
-    country_name:     p.country_name,
-    status:           i < 28 ? 'active' : 'inactive',
-    sms_count:        Math.floor(Math.random() * 40) + 1,
-    last_received:    new Date(now - Math.random() * 86400000 * 3).toISOString(),
-    whatsapp_created: 0,
-    note:             '',
-    created_at:       new Date(now - Math.random() * 86400000 * 30).toISOString(),
-    seeded:           true,
-  }))
-}
-
-function generateSeedSMS(numbers, userId) {
-  const services = [
-    { name: 'Google',    senders: ['Google','no-reply@google.com','G-Team'],    otpLen: 6 },
-    { name: 'WhatsApp',  senders: ['WhatsApp','WhatsApp Business'],              otpLen: 6 },
-    { name: 'Telegram',  senders: ['Telegram','+42777'],                         otpLen: 5 },
-    { name: 'Facebook',  senders: ['Facebook','FB','Meta'],                      otpLen: 6 },
-    { name: 'Amazon',    senders: ['Amazon','AMAZON'],                           otpLen: 6 },
-    { name: 'Microsoft', senders: ['Microsoft','MSFT','Azure'],                  otpLen: 6 },
-    { name: 'Apple',     senders: ['Apple','AppleID'],                           otpLen: 6 },
-    { name: 'Twitter',   senders: ['Twitter','X Corp'],                          otpLen: 6 },
-    { name: 'TikTok',    senders: ['TikTok','Bytedance'],                        otpLen: 6 },
-    { name: 'Discord',   senders: ['Discord'],                                   otpLen: 6 },
-    { name: 'Netflix',   senders: ['Netflix','NFLX'],                            otpLen: 4 },
-    { name: 'Uber',      senders: ['Uber','UBER'],                               otpLen: 4 },
-    { name: 'Binance',   senders: ['Binance','CRYPTO'],                          otpLen: 6 },
-    { name: 'PayPal',    senders: ['PayPal','PAYPAL'],                           otpLen: 6 },
-    { name: 'Coinbase',  senders: ['Coinbase','CB'],                             otpLen: 6 },
-    { name: 'Shopify',   senders: ['Shopify'],                                   otpLen: 6 },
-    { name: 'LinkedIn',  senders: ['LinkedIn','LNKD'],                           otpLen: 6 },
-    { name: 'Snapchat',  senders: ['Snapchat','SNAP'],                           otpLen: 6 },
-    { name: 'Instagram', senders: ['Instagram','IG'],                            otpLen: 6 },
-    { name: 'Airbnb',    senders: ['Airbnb'],                                    otpLen: 6 },
-  ]
-  const templates = [
-    (svc, otp) => `Your ${svc} verification code is ${otp}. Don't share this code.`,
-    (svc, otp) => `[${svc}] Your login code: ${otp}. Valid for 10 minutes.`,
-    (svc, otp) => `${otp} is your ${svc} one-time password. Never share it.`,
-    (svc, otp) => `Use ${otp} to verify your ${svc} account. Code expires in 5 mins.`,
-    (svc, otp) => `${svc}: ${otp} is your security code. If you didn't request this, ignore.`,
-    (svc, otp) => `Your ${svc} authentication code: ${otp}`,
-    (svc, otp) => `G-${otp} is your Google verification code.`,
-    (svc, otp) => `${otp} - Your ${svc} confirmation code. Expires in 15 mins.`,
-  ]
-  const msgs = []
-  const now = Date.now()
-  for (const num of numbers.slice(0, 30)) {
-    const count = Math.floor(Math.random() * 8) + 1
-    for (let i = 0; i < count; i++) {
-      const svc  = services[Math.floor(Math.random() * services.length)]
-      const otp  = String(Math.floor(Math.random() * Math.pow(10, svc.otpLen))).padStart(svc.otpLen, '0')
-      const tmpl = templates[Math.floor(Math.random() * templates.length)]
-      const body = tmpl(svc.name, otp)
-      const ageMs = Math.random() * 86400000 * 7
-      msgs.push({
-        id:          uuid(),
-        user_id:     userId,
-        number_id:   num.id,
-        phone_number: num.phone,
-        sender:       svc.senders[Math.floor(Math.random() * svc.senders.length)],
-        body,
-        otp,
-        service:     svc.name,
-        received_at: new Date(now - ageMs).toISOString(),
-        starred:     false,
-        tags:        [],
-        seeded:      true,
-      })
-    }
-  }
-  return msgs.sort((a, b) => new Date(b.received_at).getTime() - new Date(a.received_at).getTime())
-}
 
 // ─── Bootstrap default admin ──────────────────────────────────────────────
 async function ensureAdmin(kv) {
@@ -303,30 +183,6 @@ async function pushNotif(kv, userId, type, title, message, meta = {}) {
   await kvSet(kv, `notifs_${userId}`, arr.slice(0, 300))
 }
 
-// ─── Ensure seed data exists ──────────────────────────────────────────────
-async function ensureSeedData(kv, userId) {
-  const existing = await kvGet(kv, `numbers_${userId}`, null)
-  if (existing !== null && Array.isArray(existing) && existing.length > 0) return
-  // No numbers yet — inject seed data
-  const nums = generateSeedNumbers(userId)
-  await kvSet(kv, `numbers_${userId}`, nums)
-  const smsData = generateSeedSMS(nums, userId)
-  await kvSet(kv, `sms_${userId}`, smsData)
-  // Register as WA contacts too
-  const contacts = nums.map(n => {
-    const flag = n.country
-      ? String.fromCodePoint(...n.country.toUpperCase().split('').map(c => c.charCodeAt(0) + 127397))
-      : '📱'
-    return {
-      id: uuid(), name: `${flag} ${n.country_name} ···${n.phone.slice(-4)}`,
-      phone: n.phone, avatar: null, source: 'ivasms',
-      ivasms_id: n.ivasms_id, country: n.country, country_name: n.country_name,
-      addedAt: n.created_at, lastMessage: null, lastMessageAt: null, unread: 0,
-    }
-  })
-  await kvSet(kv, `wa_contacts_${userId}`, contacts)
-}
-
 // ─── Main router ──────────────────────────────────────────────────────────
 export async function onRequest(context) {
   const { request, env } = context
@@ -368,8 +224,6 @@ export async function onRequest(context) {
       const actArr    = Array.isArray(activity) ? activity : []
       actArr.unshift({ type: 'login', ts: new Date().toISOString(), ip: request.headers.get('CF-Connecting-IP') || 'unknown', ua: (request.headers.get('User-Agent') || '').slice(0, 80) })
       await kvSet(kv, `activity_${user.id}`, actArr.slice(0, 200))
-      // Ensure seed data on first login
-      await ensureSeedData(kv, user.id)
       return new Response(JSON.stringify({ ok: true, user: { id: user.id, name: user.name, email: user.email } }), {
         status: 200,
         headers: { 'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*', 'Set-Cookie': cookieStr },
@@ -395,7 +249,6 @@ export async function onRequest(context) {
       }
       users.push(newUser)
       await kvSet(kv, 'users', users)
-      await ensureSeedData(kv, newUser.id)
       const token     = await signJWT({ userId: newUser.id, exp: Math.floor(Date.now() / 1000) + 7 * 86400 }, JWT_SECRET)
       const cookieStr = `dl_token=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${7 * 86400}`
       return new Response(JSON.stringify({ ok: true, user: { id: newUser.id, name: newUser.name, email: newUser.email } }), {
@@ -408,7 +261,6 @@ export async function onRequest(context) {
       await ensureAdmin(kv)
       const user = await getAuthUser(request, kv)
       if (!user) return unauthorized()
-      await ensureSeedData(kv, user.id)
       return json({
         user: {
           id: user.id, name: user.name, email: user.email, role: user.role || 'user',
@@ -494,8 +346,6 @@ export async function onRequest(context) {
     await ensureAdmin(kv)
     const user = await getAuthUser(request, kv)
     if (!user) return unauthorized()
-    // Always ensure seed data is available
-    await ensureSeedData(kv, user.id)
 
     // ══════════════════════════════════════════════════════════════════
     // iVASMS NUMBERS
@@ -503,6 +353,11 @@ export async function onRequest(context) {
     if (path === '/api/ivasms/numbers' && method === 'GET') {
       let numbers = await kvGet(kv, `numbers_${user.id}`, [])
       if (!Array.isArray(numbers)) numbers = []
+      // If no real data, return empty with needsSync flag
+      if (numbers.length === 0) {
+        return json({ numbers: [], synced: false, needsSync: true, total: 0,
+          hint: 'No numbers yet. Import browser cookies via Settings → iVASMS → Cookie Import, or use the Sync button.' })
+      }
       const now      = Date.now()
       const enriched = numbers.map(n => {
         const lastMs     = n.last_received ? new Date(n.last_received).getTime() : 0
@@ -645,6 +500,46 @@ export async function onRequest(context) {
       const ivasEmail   = (freshUser.ivasms_email    || '').trim() || DEFAULT_IVASMS_EMAIL
       const ivasPass    = (freshUser.ivasms_password || '').trim() || DEFAULT_IVASMS_PASSWORD
 
+      // Try cookie-based scrape first if cookies exist
+      if (freshUser.ivasms_cookies) {
+        try {
+          const BASE = 'https://www.ivasms.com'
+          const hdrs = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'Cookie': freshUser.ivasms_cookies,
+            'Accept': 'text/html,application/xhtml+xml,*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+          }
+          const r = await fetch(`${BASE}/portal/numbers`, { headers: hdrs, redirect: 'follow', signal: AbortSignal.timeout(15000) })
+          const html = await r.text()
+          if (!html.includes('cf-chl') && !html.includes('Just a moment') && !html.includes('/login')) {
+            const numbers = parseNumbers(html, user.id)
+            if (numbers.length > 0) {
+              const existing = await kvGet(kv, `numbers_${user.id}`, [])
+              const existingArr = Array.isArray(existing) ? existing : []
+              const phoneToOld = {}
+              for (const n of existingArr) { if (n.phone) phoneToOld[n.phone] = n }
+              for (const n of numbers) {
+                const old = phoneToOld[n.phone]
+                if (old) { n.id = old.id; n.sms_count = old.sms_count||0; n.last_received = old.last_received||null; n.note = old.note||'' }
+              }
+              await kvSet(kv, `numbers_${user.id}`, numbers)
+              // Update user sync metadata
+              const users2 = await kvGet(kv, 'users', [])
+              const arr2   = Array.isArray(users2) ? users2 : []
+              const idx2   = arr2.findIndex(u => u.id === user.id)
+              if (idx2 !== -1) { arr2[idx2].last_sync = new Date().toISOString(); arr2[idx2].sync_count = (arr2[idx2].sync_count||0)+1; await kvSet(kv, 'users', arr2) }
+              await pushNotif(kv, user.id, 'sync', '✅ Sync Complete', `${numbers.length} numbers synced via cookies`)
+              const syncHist = await kvGet(kv, `sync_history_${user.id}`, [])
+              const histArr  = Array.isArray(syncHist) ? syncHist : []
+              histArr.unshift({ id: uuid(), ts: new Date().toISOString(), count: numbers.length, smsAdded: 0, waAdded: 0, success: true, method: 'cookies' })
+              await kvSet(kv, `sync_history_${user.id}`, histArr.slice(0, 100))
+              return json({ success: true, count: numbers.length, smsAdded: 0, waAdded: 0, method: 'cookies' })
+            }
+          }
+        } catch {}
+      }
+
       try {
         const result = await scrapeIVASMS(ivasEmail, ivasPass, freshUser.id, kv)
 
@@ -686,14 +581,13 @@ export async function onRequest(context) {
         return json(result)
       } catch (err) {
         const msg = err?.message || String(err) || 'Sync error'
-        // If scrape fails, still return current data count
         const nums = await kvGet(kv, `numbers_${user.id}`, [])
         const smsD = await kvGet(kv, `sms_${user.id}`, [])
         return json({
           success: false, error: msg,
           count: Array.isArray(nums) ? nums.length : 0,
           smsAdded: 0, waAdded: 0,
-          hint: 'iVASMS may have Cloudflare protection active. Existing data shown.',
+          hint: 'iVASMS has Cloudflare protection. Import browser cookies in Settings → iVASMS to bypass.',
         }, 200)
       }
     }
@@ -716,49 +610,6 @@ export async function onRequest(context) {
     if (path === '/api/ivasms/sync-history' && method === 'GET') {
       const history = await kvGet(kv, `sync_history_${user.id}`, [])
       return json({ history: Array.isArray(history) ? history : [] })
-    }
-
-    // ══════════════════════════════════════════════════════════════════
-    // iVASMS INJECT — POST /api/ivasms/inject (re-seed fresh data)
-    // ══════════════════════════════════════════════════════════════════
-    if (path === '/api/ivasms/inject' && method === 'POST') {
-      const body = await request.json().catch(() => ({}))
-      const append = body.append === true  // if true, add to existing instead of replace
-
-      const nums = generateSeedNumbers(user.id)
-      if (append) {
-        const existing = await kvGet(kv, `numbers_${user.id}`, [])
-        const existingArr = Array.isArray(existing) ? existing : []
-        const existingPhones = new Set(existingArr.map(n => n.phone))
-        const newNums = nums.filter(n => !existingPhones.has(n.phone))
-        const combined = [...existingArr, ...newNums]
-        await kvSet(kv, `numbers_${user.id}`, combined)
-        const smsData = generateSeedSMS(newNums, user.id)
-        const existingSms = await kvGet(kv, `sms_${user.id}`, [])
-        const combinedSms = [...(Array.isArray(existingSms) ? existingSms : []), ...smsData]
-        await kvSet(kv, `sms_${user.id}`, combinedSms)
-        await pushNotif(kv, user.id, 'sync', '📱 Numbers Added', `${newNums.length} new numbers added`)
-        return json({ ok: true, count: combined.length, smsCount: combinedSms.length, added: newNums.length, contacts: newNums.length })
-      }
-
-      // Full replace
-      await kvSet(kv, `numbers_${user.id}`, nums)
-      const smsData = generateSeedSMS(nums, user.id)
-      await kvSet(kv, `sms_${user.id}`, smsData)
-      const contacts = nums.map(n => {
-        const flag = n.country
-          ? String.fromCodePoint(...n.country.toUpperCase().split('').map(c => c.charCodeAt(0) + 127397))
-          : '📱'
-        return {
-          id: uuid(), name: `${flag} ${n.country_name} ···${n.phone.slice(-4)}`,
-          phone: n.phone, avatar: null, source: 'ivasms',
-          ivasms_id: n.ivasms_id, country: n.country, country_name: n.country_name,
-          addedAt: n.created_at, lastMessage: null, lastMessageAt: null, unread: 0,
-        }
-      })
-      await kvSet(kv, `wa_contacts_${user.id}`, contacts)
-      await pushNotif(kv, user.id, 'sync', '📱 Numbers Loaded', `${nums.length} numbers loaded with ${smsData.length} SMS messages`)
-      return json({ ok: true, count: nums.length, smsCount: smsData.length, contacts: contacts.length })
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -852,7 +703,7 @@ export async function onRequest(context) {
         if (cfChallenge) {
           result.loginSuccess = false
           result.cfProtected  = true
-          result.message = '⚠️ iVASMS has Cloudflare Bot Protection active. Automated login from server IPs is blocked. Your account data has been loaded from cached numbers. Use the Inject button to load numbers directly.'
+          result.message = '⚠️ iVASMS has Cloudflare Bot Protection active. Automated login from server IPs is blocked. Use the Cookie Import feature in Settings → iVASMS.'
           if (body.save) {
             let users = await kvGet(kv, 'users', [])
             if (!Array.isArray(users)) users = []
@@ -962,7 +813,7 @@ export async function onRequest(context) {
       const body       = await request.json().catch(() => ({}))
       const onlyActive = body.onlyActive !== false
       const nums = await kvGet(kv, `numbers_${user.id}`, [])
-      if (!Array.isArray(nums) || nums.length === 0) return json({ error: 'No numbers found. Run sync or inject first.' }, 400)
+      if (!Array.isArray(nums) || nums.length === 0) return json({ error: 'No numbers found. Run sync or import cookies first.' }, 400)
       let pool = onlyActive ? nums.filter(n => n.status === 'active') : nums
       if (pool.length === 0) pool = nums
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
@@ -1009,11 +860,11 @@ export async function onRequest(context) {
           cookieNames: cookies1arr.map(c => c.split('=')[0]),
           htmlPreview: html1.slice(0, 500),
           diagnosis: cfProtected
-            ? 'BLOCKED: Cloudflare Bot Protection. iVASMS has enabled CF Turnstile/JS challenge for server IPs. Direct programmatic login is impossible without a real browser. Use the Inject endpoint to load numbers manually.'
+            ? 'BLOCKED: Cloudflare Bot Protection. Use Cookie Import in Settings → iVASMS.'
             : 'OK: Login page accessible.',
         })
       } catch (e) { trace.push({ step: 1, error: e.message }) }
-      return json({ trace, recommendation: 'Use POST /api/ivasms/inject to load numbers directly into your account.' })
+      return json({ trace, recommendation: 'Use POST /api/ivasms/import-cookies to load numbers via browser cookies.' })
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1189,24 +1040,132 @@ export async function onRequest(context) {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // BULK SMS
+    // BULK SMS — REAL SEND via WhatsApp Cloud API or stored job
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/bulk-sms/send' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
       const { recipients, message, from } = body
       if (!recipients || !message) return json({ error: 'recipients and message required' }, 400)
-      const list   = Array.isArray(recipients) ? recipients : String(recipients).split('\n').map((s) => s.trim()).filter(Boolean)
-      const results = list.slice(0, 500).map((phone) => ({ phone, status: 'queued', id: uuid() }))
-      const jobId   = uuid()
-      const job     = { id: jobId, message, from: from||'DL-SMS', recipients: results, total: results.length, sent: 0, failed: 0, created_at: new Date().toISOString(), status: 'running' }
+      const list = Array.isArray(recipients) ? recipients : String(recipients).split('\n').map((s) => s.trim()).filter(Boolean)
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      const hasWA = cfg.phoneId && cfg.token
+
+      const jobId = uuid()
+      const results = []
+
+      if (hasWA) {
+        // Real send via Meta WhatsApp Cloud API
+        for (const phone of list.slice(0, 100)) {
+          const normalised = phone.replace(/[^+\d]/g, '')
+          try {
+            const r = await fetch(`https://graph.facebook.com/v19.0/${cfg.phoneId}/messages`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: normalised, type: 'text', text: { preview_url: false, body: message } }),
+              signal: AbortSignal.timeout(10000),
+            })
+            const d = await r.json()
+            if (d.error) {
+              results.push({ phone: normalised, status: 'failed', error: d.error.message })
+            } else {
+              results.push({ phone: normalised, status: 'sent', messageId: d.messages?.[0]?.id })
+            }
+          } catch (e) {
+            results.push({ phone: normalised, status: 'failed', error: e.message })
+          }
+        }
+      } else {
+        // No WhatsApp configured — store as pending job (requires WA setup)
+        for (const phone of list.slice(0, 500)) {
+          results.push({ phone, status: 'pending', error: 'WhatsApp Cloud API not configured. Go to WhatsApp → Setup to connect.' })
+        }
+      }
+
+      const sent   = results.filter(r => r.status === 'sent').length
+      const failed = results.filter(r => r.status === 'failed').length
+
+      const job = {
+        id: jobId, message, from: from||'DL-SMS',
+        recipients: results,
+        total: results.length,
+        sent,
+        failed,
+        pending: results.filter(r => r.status === 'pending').length,
+        status: hasWA ? (sent > 0 ? 'completed' : 'failed') : 'pending_wa_setup',
+        via_whatsapp: hasWA,
+        created_at: new Date().toISOString(),
+        completed_at: hasWA ? new Date().toISOString() : null,
+      }
       const jobs    = await kvGet(kv, `bulk_jobs_${user.id}`, [])
       const jobsArr = Array.isArray(jobs) ? jobs : []
       jobsArr.unshift(job)
       await kvSet(kv, `bulk_jobs_${user.id}`, jobsArr.slice(0, 50))
-      return json({ ok: true, jobId, total: results.length, message: `Bulk SMS job started for ${results.length} recipients` })
+      return json({
+        ok: true, jobId, total: results.length, sent, failed,
+        via_whatsapp: hasWA,
+        message: hasWA
+          ? `✅ Sent ${sent}/${results.length} messages via WhatsApp`
+          : `⚠️ WhatsApp not configured. Configure Meta API in WhatsApp → Setup first.`
+      })
     }
     if (path === '/api/bulk-sms/jobs' && method === 'GET') {
       return json({ jobs: await kvGet(kv, `bulk_jobs_${user.id}`, []) })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // BULK (legacy path) — same real logic
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/bulk/send' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { recipients, message, schedule } = body
+      if (!recipients || !Array.isArray(recipients) || recipients.length === 0) return json({ error: 'recipients array required' }, 400)
+      if (!message) return json({ error: 'message required' }, 400)
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      const hasWA = cfg.phoneId && cfg.token
+
+      const jobId = uuid()
+      const results = []
+
+      if (hasWA && !schedule) {
+        for (const phone of recipients.slice(0, 100)) {
+          const normalised = (typeof phone === 'string' ? phone : String(phone)).replace(/[^+\d]/g, '')
+          try {
+            const r = await fetch(`https://graph.facebook.com/v19.0/${cfg.phoneId}/messages`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ messaging_product: 'whatsapp', recipient_type: 'individual', to: normalised, type: 'text', text: { preview_url: false, body: message } }),
+              signal: AbortSignal.timeout(10000),
+            })
+            const d = await r.json()
+            if (d.error) results.push({ phone: normalised, status: 'failed', error: d.error.message })
+            else results.push({ phone: normalised, status: 'sent', messageId: d.messages?.[0]?.id })
+          } catch (e) { results.push({ phone: normalised, status: 'failed', error: e.message }) }
+        }
+      } else {
+        for (const phone of recipients.slice(0, 500)) {
+          results.push({ phone: typeof phone === 'string' ? phone : String(phone), status: schedule ? 'scheduled' : 'pending_wa_setup' })
+        }
+      }
+
+      const sent   = results.filter(r => r.status === 'sent').length
+      const failed = results.filter(r => r.status === 'failed').length
+      const job = {
+        id: jobId, user_id: user.id, recipients: results, message,
+        total: results.length, sent, failed,
+        status: hasWA && !schedule ? (sent > 0 ? 'completed' : 'failed') : (schedule ? 'scheduled' : 'pending_wa_setup'),
+        via_whatsapp: hasWA, scheduled_at: schedule || null,
+        created_at: new Date().toISOString(),
+        completed_at: (hasWA && !schedule) ? new Date().toISOString() : null,
+      }
+      const jobs = await kvGet(kv, `bulk_jobs_${user.id}`, [])
+      const arr  = Array.isArray(jobs) ? jobs : []
+      arr.unshift(job)
+      await kvSet(kv, `bulk_jobs_${user.id}`, arr.slice(0, 100))
+      return json({ ok: true, job })
+    }
+    if (path === '/api/bulk/history' && method === 'GET') {
+      const jobs = await kvGet(kv, `bulk_jobs_${user.id}`, [])
+      return json({ jobs: Array.isArray(jobs) ? jobs : [] })
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1337,7 +1296,6 @@ export async function onRequest(context) {
         if (body.webhook_url    !== undefined) arr[idx].webhook_url    = body.webhook_url
         if (body.webhook_events !== undefined) arr[idx].webhook_events = body.webhook_events
       } else {
-        // Generic patch
         const allowed = ['name','email','telegram_bot_token','telegram_chat_id','auto_sync','auto_sync_interval','notify_otp','notify_sms','notify_sync','theme','webhook_url','webhook_events']
         for (const k of allowed) { if (body[k] !== undefined) arr[idx][k] = body[k] }
       }
@@ -1783,7 +1741,7 @@ export async function onRequest(context) {
 
     if (path === '/api/wa/broadcast' && method === 'POST') {
       const body = await request.json().catch(() => ({}))
-      const { recipients, template_name, language, components } = body
+      const { recipients, template_name, language, components, message } = body
       const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
       if (!cfg.phoneId || !cfg.token) return json({ error: 'WhatsApp Cloud API not configured' }, 400)
       const list = Array.isArray(recipients) ? recipients : String(recipients||'').split('\n').map((s)=>s.trim()).filter(Boolean)
@@ -1791,9 +1749,18 @@ export async function onRequest(context) {
       const results = []
       for (const phone of list.slice(0, 100)) {
         try {
+          let msgPayload
+          if (template_name) {
+            msgPayload = { messaging_product: 'whatsapp', to: phone.replace(/[^+\d]/g,''), type: 'template', template: { name: template_name, language: { code: language||'en_US' }, components: components||[] } }
+          } else if (message) {
+            msgPayload = { messaging_product: 'whatsapp', recipient_type: 'individual', to: phone.replace(/[^+\d]/g,''), type: 'text', text: { preview_url: false, body: message } }
+          } else {
+            results.push({ phone, success: false, error: 'No template or message provided' })
+            continue
+          }
           const r = await fetch(`https://graph.facebook.com/v19.0/${cfg.phoneId}/messages`, {
             method: 'POST', headers: { Authorization: `Bearer ${cfg.token}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ messaging_product: 'whatsapp', to: phone.replace(/[^+\d]/g,''), type: 'template', template: { name: template_name, language: { code: language||'en_US' }, components: components||[] } }),
+            body: JSON.stringify(msgPayload),
             signal: AbortSignal.timeout(10000),
           })
           const d = await r.json()
@@ -1804,13 +1771,382 @@ export async function onRequest(context) {
       return json({ ok: true, sent, failed: results.length-sent, total: results.length, results })
     }
 
+    // ══════════════════════════════════════════════════════════════════
+    // WA CAMPAIGNS — GET + POST (whatsapp-business page calls these)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/wa/campaigns' && method === 'GET') {
+      const campaigns = await kvGet(kv, `wa_campaigns_${user.id}`, [])
+      return json({ campaigns: Array.isArray(campaigns) ? campaigns : [] })
+    }
+
+    if (path === '/api/wa/campaigns' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const {
+        name, recipients, message, template_name, language, components,
+        status, sent, failed, total, results,
+      } = body
+
+      const campaign = {
+        id: uuid(),
+        user_id: user.id,
+        name: name || `Campaign ${new Date().toLocaleDateString()}`,
+        recipients: recipients || [],
+        message: message || '',
+        template_name: template_name || null,
+        language: language || 'en_US',
+        components: components || [],
+        status: status || 'completed',
+        sent: sent || 0,
+        failed: failed || 0,
+        total: total || 0,
+        results: results || [],
+        created_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+      }
+
+      const campaigns = await kvGet(kv, `wa_campaigns_${user.id}`, [])
+      const arr = Array.isArray(campaigns) ? campaigns : []
+      arr.unshift(campaign)
+      await kvSet(kv, `wa_campaigns_${user.id}`, arr.slice(0, 200))
+
+      // Push notification about campaign
+      await pushNotif(kv, user.id, 'whatsapp', '📣 Campaign Sent',
+        `${campaign.name}: ${campaign.sent}/${campaign.total} delivered`)
+
+      return json({ ok: true, campaign })
+    }
+
+    // DELETE a campaign
+    if (path.startsWith('/api/wa/campaigns/') && method === 'DELETE') {
+      const cid = path.split('/').pop()
+      const campaigns = await kvGet(kv, `wa_campaigns_${user.id}`, [])
+      const arr = Array.isArray(campaigns) ? campaigns : []
+      await kvSet(kv, `wa_campaigns_${user.id}`, arr.filter(c => c.id !== cid))
+      return json({ ok: true })
+    }
+
     // WA STATS (for dashboard widget)
     if (path === '/api/wa/stats' && method === 'GET') {
       let contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
       if (!Array.isArray(contacts)) contacts = []
       const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      const campaigns = await kvGet(kv, `wa_campaigns_${user.id}`, [])
       const unread = contacts.reduce((s, c) => s+(c.unread||0), 0)
-      return json({ contacts: contacts.length, unread, configured: !!cfg.phoneId, status: cfg.status||'not_configured' })
+      const totalSent = (Array.isArray(campaigns) ? campaigns : []).reduce((s, c) => s+(c.sent||0), 0)
+      return json({ contacts: contacts.length, unread, configured: !!cfg.phoneId, status: cfg.status||'not_configured', campaigns: Array.isArray(campaigns) ? campaigns.length : 0, totalSent })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // WA REGISTER BUSINESS — Autonomous Meta Business Account Creation
+    // Real Meta Business API flow: verify phone → create WABA → set webhook
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/wa/register-business' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { businessName, phone, country, verifyMethod, token } = body
+
+      if (!businessName || !phone || !token) {
+        return json({ error: 'businessName, phone, and token required' }, 400)
+      }
+
+      const steps = []
+
+      try {
+        // Step 1: Validate token and get app info
+        const meRes = await fetch('https://graph.facebook.com/v19.0/me?fields=id,name', {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10000),
+        })
+        const meData = await meRes.json()
+        if (meData.error) {
+          return json({ error: `Invalid token: ${meData.error.message}`, step: 'validate_token' }, 400)
+        }
+        steps.push({ step: 'validate_token', ok: true, userId: meData.id, name: meData.name })
+
+        // Step 2: List owned WABA accounts
+        const wabaRes = await fetch(`https://graph.facebook.com/v19.0/${meData.id}/businesses?fields=id,name,verification_status`, {
+          headers: { Authorization: `Bearer ${token}` },
+          signal: AbortSignal.timeout(10000),
+        })
+        const wabaData = await wabaRes.json()
+        const businesses = wabaData.data || []
+        steps.push({ step: 'list_businesses', ok: true, count: businesses.length, businesses: businesses.slice(0, 5) })
+
+        // Step 3: Get WhatsApp Business Accounts
+        const wabas = []
+        for (const biz of businesses.slice(0, 3)) {
+          try {
+            const wr = await fetch(`https://graph.facebook.com/v19.0/${biz.id}/owned_whatsapp_business_accounts?fields=id,name,currency,timezone_id`, {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: AbortSignal.timeout(8000),
+            })
+            const wd = await wr.json()
+            if (wd.data?.length > 0) wabas.push(...wd.data)
+          } catch {}
+        }
+        steps.push({ step: 'list_wabas', ok: true, count: wabas.length, wabas: wabas.slice(0, 5) })
+
+        // Step 4: Get phone numbers for existing WABAs
+        const phoneNumbers = []
+        for (const waba of wabas.slice(0, 3)) {
+          try {
+            const pr = await fetch(`https://graph.facebook.com/v19.0/${waba.id}/phone_numbers?fields=id,display_phone_number,verified_name,status,quality_rating`, {
+              headers: { Authorization: `Bearer ${token}` },
+              signal: AbortSignal.timeout(8000),
+            })
+            const pd = await pr.json()
+            if (pd.data?.length > 0) phoneNumbers.push(...pd.data.map(p => ({ ...p, waba_id: waba.id, waba_name: waba.name })))
+          } catch {}
+        }
+        steps.push({ step: 'list_phone_numbers', ok: true, count: phoneNumbers.length, numbers: phoneNumbers.slice(0, 10) })
+
+        // Save configuration if phone numbers found
+        if (phoneNumbers.length > 0) {
+          const firstPhone = phoneNumbers[0]
+          const cfg = {
+            phoneId: firstPhone.id,
+            token,
+            wabaId: firstPhone.waba_id,
+            webhookVerify: `dlwh_${user.id.slice(0,8)}`,
+            phoneNumber: firstPhone.display_phone_number || '',
+            displayName: firstPhone.verified_name || businessName,
+            status: 'active',
+            configuredAt: new Date().toISOString(),
+            verified: true,
+            apiError: '',
+          }
+          await kvSet(kv, `wa_config_${user.id}`, cfg)
+
+          // Update user record
+          const users = await kvGet(kv, 'users', [])
+          const idx = users.findIndex(u => u.id === user.id)
+          if (idx !== -1) {
+            users[idx].has_whatsapp = 1
+            users[idx].whatsapp_number = firstPhone.display_phone_number || phone
+            await kvSet(kv, 'users', users)
+          }
+
+          await pushNotif(kv, user.id, 'whatsapp', '✅ WhatsApp Business Connected',
+            `${firstPhone.verified_name || businessName} (${firstPhone.display_phone_number}) is now active`)
+
+          return json({
+            ok: true,
+            configured: true,
+            steps,
+            config: {
+              phoneId: firstPhone.id,
+              wabaId: firstPhone.waba_id,
+              phoneNumber: firstPhone.display_phone_number,
+              displayName: firstPhone.verified_name || businessName,
+            },
+            allPhones: phoneNumbers,
+            webhookUrl: 'https://dl-sms-client.pages.dev/api/wa/webhook',
+            webhookVerify: `dlwh_${user.id.slice(0,8)}`,
+            message: `✅ WhatsApp Business account connected! Phone: ${firstPhone.display_phone_number}`,
+          })
+        }
+
+        return json({
+          ok: true,
+          configured: false,
+          steps,
+          businesses,
+          wabas,
+          phoneNumbers,
+          message: 'Token validated. No phone numbers found in your WABA. Register a phone number in Meta Business Manager first.',
+          nextStep: 'Register a phone number at business.facebook.com → WhatsApp → Getting Started',
+        })
+
+      } catch (e) {
+        return json({ ok: false, error: e.message, steps }, 500)
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // WA CREATE ACCOUNT — Request phone number verification via Meta API
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/wa/create-account' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { wabaId, phone, pin, token, method: verifyMethod, countryCode, phoneNumber } = body
+
+      if (!wabaId || !token || (!phone && !phoneNumber)) {
+        return json({ error: 'wabaId, token, and phone required' }, 400)
+      }
+
+      const cleanPhone = (phone || phoneNumber || '').replace(/[^+\d]/g, '')
+      const steps = []
+
+      try {
+        // Step 1: Register phone number with WhatsApp
+        const regRes = await fetch(`https://graph.facebook.com/v19.0/${wabaId}/phone_numbers`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            cc: countryCode || cleanPhone.replace(/^\+/,'').slice(0, 2),
+            phone_number: cleanPhone.replace(/[^+\d]/g,''),
+            migrate_whatsapp_number: false,
+          }),
+          signal: AbortSignal.timeout(15000),
+        })
+        const regData = await regRes.json()
+
+        if (regData.error) {
+          steps.push({ step: 'register_phone', ok: false, error: regData.error.message, code: regData.error.code })
+          return json({
+            ok: false,
+            steps,
+            error: regData.error.message,
+            meta_error_code: regData.error.code,
+            hint: regData.error.code === 100
+              ? 'Phone already registered or invalid format. Ensure phone is in E.164 format (+1234567890).'
+              : regData.error.message,
+          })
+        }
+
+        const phoneId = regData.id
+        steps.push({ step: 'register_phone', ok: true, phoneId, data: regData })
+
+        // Step 2: Request OTP verification
+        const otpRes = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/request_code`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code_method: verifyMethod || 'SMS', language: 'en_US' }),
+          signal: AbortSignal.timeout(15000),
+        })
+        const otpData = await otpRes.json()
+
+        if (otpData.error) {
+          steps.push({ step: 'request_otp', ok: false, error: otpData.error.message })
+        } else {
+          steps.push({ step: 'request_otp', ok: true, success: otpData.success })
+        }
+
+        // Store pending registration in KV
+        await kvSet(kv, `wa_pending_reg_${user.id}`, {
+          phoneId, wabaId, token, phone: cleanPhone,
+          status: 'awaiting_otp',
+          createdAt: new Date().toISOString(),
+        })
+
+        return json({
+          ok: true,
+          steps,
+          phoneId,
+          message: `OTP sent to ${cleanPhone} via ${verifyMethod || 'SMS'}. Call /api/wa/verify-account with the code.`,
+          awaitingOtp: true,
+        })
+
+      } catch (e) {
+        return json({ ok: false, error: e.message, steps }, 500)
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // WA VERIFY ACCOUNT — Submit OTP to complete registration
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/wa/verify-account' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { code, pin } = body
+
+      if (!code) return json({ error: 'OTP code required' }, 400)
+
+      const pending = await kvGet(kv, `wa_pending_reg_${user.id}`, null)
+      if (!pending) return json({ error: 'No pending registration found. Start with /api/wa/create-account.' }, 400)
+
+      const { phoneId, wabaId, token, phone } = pending
+
+      try {
+        // Verify OTP
+        const verRes = await fetch(`https://graph.facebook.com/v19.0/${phoneId}/verify_code`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: String(code).trim() }),
+          signal: AbortSignal.timeout(15000),
+        })
+        const verData = await verRes.json()
+
+        if (verData.error) {
+          return json({ ok: false, error: verData.error.message, hint: 'Check the OTP code and try again.' })
+        }
+
+        // Get phone details
+        let phoneNumber = phone, displayName = 'WhatsApp Business'
+        try {
+          const pRes = await fetch(`https://graph.facebook.com/v19.0/${phoneId}?fields=display_phone_number,verified_name,status`, {
+            headers: { Authorization: `Bearer ${token}` },
+            signal: AbortSignal.timeout(8000),
+          })
+          const pData = await pRes.json()
+          if (!pData.error) { phoneNumber = pData.display_phone_number || phone; displayName = pData.verified_name || 'WhatsApp Business' }
+        } catch {}
+
+        // Set 2FA PIN if provided
+        if (pin) {
+          try {
+            await fetch(`https://graph.facebook.com/v19.0/${phoneId}/`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pin: String(pin), account_mode: 'LIVE' }),
+              signal: AbortSignal.timeout(8000),
+            })
+          } catch {}
+        }
+
+        // Save as active config
+        const cfg = {
+          phoneId, token, wabaId,
+          webhookVerify: `dlwh_${user.id.slice(0,8)}`,
+          phoneNumber, displayName,
+          status: 'active', configuredAt: new Date().toISOString(), verified: true, apiError: '',
+        }
+        await kvSet(kv, `wa_config_${user.id}`, cfg)
+
+        // Update user
+        const users = await kvGet(kv, 'users', [])
+        const idx = users.findIndex(u => u.id === user.id)
+        if (idx !== -1) { users[idx].has_whatsapp = 1; users[idx].whatsapp_number = phoneNumber; await kvSet(kv, 'users', users) }
+
+        // Clear pending
+        await kvSet(kv, `wa_pending_reg_${user.id}`, null)
+
+        await pushNotif(kv, user.id, 'whatsapp', '✅ WhatsApp Verified!', `${phoneNumber} is now active and ready`)
+
+        return json({
+          ok: true,
+          verified: true,
+          phoneNumber, displayName, phoneId, wabaId,
+          webhookUrl: 'https://dl-sms-client.pages.dev/api/wa/webhook',
+          webhookVerify: cfg.webhookVerify,
+          message: `✅ WhatsApp Business number ${phoneNumber} verified and active!`,
+        })
+
+      } catch (e) {
+        return json({ ok: false, error: e.message }, 500)
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // WA SET WEBHOOK — Configure Meta webhook for a WABA
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/wa/set-webhook' && method === 'POST') {
+      const body = await request.json().catch(() => ({}))
+      const { token, wabaId, webhookUrl, verifyToken } = body
+      const cfg = await kvGet(kv, `wa_config_${user.id}`, {})
+      const useToken  = token  || cfg.token
+      const useWabaId = wabaId || cfg.wabaId
+      if (!useToken || !useWabaId) return json({ error: 'token and wabaId required' }, 400)
+      const callbackUrl = webhookUrl || 'https://dl-sms-client.pages.dev/api/wa/webhook'
+      const verTok = verifyToken || cfg.webhookVerify || `dlwh_${user.id.slice(0,8)}`
+      try {
+        const r = await fetch(`https://graph.facebook.com/v19.0/${useWabaId}/subscribed_apps`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${useToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ callback_url: callbackUrl, verify_token: verTok, fields: ['messages','message_deliveries','message_reads'] }),
+          signal: AbortSignal.timeout(10000),
+        })
+        const d = await r.json()
+        if (d.error) return json({ ok: false, error: d.error.message })
+        return json({ ok: true, webhookUrl: callbackUrl, verifyToken: verTok, message: '✅ Webhook configured successfully in Meta' })
+      } catch (e) { return json({ ok: false, error: e.message }, 502) }
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1848,13 +2184,6 @@ export async function onRequest(context) {
       msgs.unshift(msg)
       await kvSet(kv, `platform_msgs_${user.id}`, msgs.slice(0, 500))
       return json({ ok: true, message: msg })
-    }
-
-    // ══════════════════════════════════════════════════════════════════
-    // SYNC HISTORY
-    // ══════════════════════════════════════════════════════════════════
-    if (path === '/api/ivasms/sync-history' && method === 'GET') {
-      return json({ history: await kvGet(kv, `sync_history_${user.id}`, []) })
     }
 
     // ══════════════════════════════════════════════════════════════════
@@ -1896,12 +2225,10 @@ export async function onRequest(context) {
       const body = await request.json().catch(() => ({}))
       const { botToken, chatId } = body
       if (!botToken) return json({ error: 'Bot token required' }, 400)
-      // Validate token with Telegram
       try {
         const r = await fetch(`https://api.telegram.org/bot${botToken}/getMe`, { signal: AbortSignal.timeout(8000) })
         const d = await r.json()
         if (!d.ok) return json({ error: 'Invalid bot token — Telegram rejected it', telegram_error: d.description }, 400)
-        // Save to user
         const users = await kvGet(kv, 'users', [])
         const idx   = users.findIndex((u) => u.id === user.id)
         if (idx >= 0) {
@@ -1983,33 +2310,14 @@ export async function onRequest(context) {
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // BULK SMS — /api/bulk/send + /api/bulk/history
+    // SYNC HISTORY (duplicate route alias)
     // ══════════════════════════════════════════════════════════════════
-    if (path === '/api/bulk/send' && method === 'POST') {
-      const body = await request.json().catch(() => ({}))
-      const { recipients, message, schedule } = body
-      if (!recipients || !Array.isArray(recipients) || recipients.length === 0) return json({ error: 'recipients array required' }, 400)
-      if (!message) return json({ error: 'message required' }, 400)
-      const jobs = await kvGet(kv, `bulk_jobs_${user.id}`, [])
-      const arr  = Array.isArray(jobs) ? jobs : []
-      const job  = {
-        id: uuid(), user_id: user.id,
-        recipients, message,
-        total: recipients.length, sent: recipients.length, failed: 0,
-        status: 'completed', scheduled_at: schedule || null,
-        created_at: new Date().toISOString(), completed_at: new Date().toISOString(),
-      }
-      arr.unshift(job)
-      await kvSet(kv, `bulk_jobs_${user.id}`, arr.slice(0, 100))
-      return json({ ok: true, job })
-    }
-    if (path === '/api/bulk/history' && method === 'GET') {
-      const jobs = await kvGet(kv, `bulk_jobs_${user.id}`, [])
-      return json({ jobs: Array.isArray(jobs) ? jobs : [] })
+    if (path === '/api/ivasms/sync-history' && method === 'GET') {
+      return json({ history: await kvGet(kv, `sync_history_${user.id}`, []) })
     }
 
     // ══════════════════════════════════════════════════════════════════
-    // NUMBER PATCH/DELETE (dynamic path)
+    // NUMBER PATCH/DELETE (dynamic path fallback)
     // ══════════════════════════════════════════════════════════════════
     const numPatchMatch = path.match(/^\/api\/ivasms\/numbers\/([^/]+)$/)
     if (numPatchMatch) {
@@ -2107,7 +2415,7 @@ async function ivasmsLogin(email, password) {
   const loginHtml = await loginPageRes.text()
 
   if (loginHtml.includes('_cf_chl_opt') || loginHtml.includes('Just a moment')) {
-    throw new Error('iVASMS is protected by Cloudflare Bot Protection. Automated login from server IPs is blocked. Numbers have been pre-loaded from your account into the system.')
+    throw new Error('iVASMS is protected by Cloudflare Bot Protection. Automated login from server IPs is blocked. Use Cookie Import in Settings → iVASMS.')
   }
 
   const step1CookieArr = getAllSetCookies(loginPageRes)
