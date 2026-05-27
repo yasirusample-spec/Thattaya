@@ -348,6 +348,197 @@ export async function onRequest(context) {
     if (!user) return unauthorized()
 
     // ══════════════════════════════════════════════════════════════════
+    // HEARTBEAT — real-time always-connected pulse
+    // GET /api/heartbeat?since=ISO — returns new SMS count, notifications
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/heartbeat' && method === 'GET') {
+      const since = url.searchParams.get('since') || ''
+      const now   = new Date().toISOString()
+
+      // Count new SMS since `since`
+      let newCount = 0
+      try {
+        let msgs = await kvGet(kv, `sms_${user.id}`, [])
+        if (Array.isArray(msgs) && since) {
+          const sinceMs = new Date(since).getTime()
+          if (!isNaN(sinceMs)) newCount = msgs.filter(m => new Date(m.received_at).getTime() > sinceMs).length
+        }
+      } catch {}
+
+      // Unread notifications
+      let unreadNotif = 0
+      try {
+        const notifs = await kvGet(kv, `notifs_${user.id}`, [])
+        unreadNotif = (Array.isArray(notifs) ? notifs : []).filter(n => !n.read).length
+      } catch {}
+
+      // Total SMS count
+      let sms = 0
+      try {
+        const allSms = await kvGet(kv, `sms_${user.id}`, [])
+        sms = Array.isArray(allSms) ? allSms.length : 0
+      } catch {}
+
+      // Numbers count
+      let numbers = 0
+      try {
+        const nums = await kvGet(kv, `numbers_${user.id}`, [])
+        numbers = Array.isArray(nums) ? nums.length : 0
+      } catch {}
+
+      // WA unread
+      let waUnread = 0
+      try {
+        const contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
+        waUnread = (Array.isArray(contacts) ? contacts : []).reduce((s, c) => s + (c.unread || 0), 0)
+      } catch {}
+
+      const freshUsers = await kvGet(kv, 'users', [])
+      const freshUser  = (Array.isArray(freshUsers) ? freshUsers : []).find(u => u.id === user.id) || user
+
+      return json({
+        ok: true,
+        ts: now,
+        newCount,
+        sms,
+        numbers,
+        unreadNotif,
+        waUnread,
+        ivasOk: !!(freshUser.ivasms_email || freshUser.ivasms_cookies),
+        autoSync: freshUser.auto_sync || false,
+        lastSync: freshUser.last_sync || null,
+        syncCount: freshUser.sync_count || 0,
+        hasCookies: !!freshUser.ivasms_cookies,
+        hasWA: !!((await kvGet(kv, `wa_config_${user.id}`, {})).phoneId),
+      })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SEARCH — /api/search?q=term
+    // Searches SMS messages and phone numbers
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/search' && method === 'GET') {
+      const q = (url.searchParams.get('q') || '').trim().toLowerCase()
+      if (!q || q.length < 2) return json({ results: [] })
+
+      const results = []
+
+      // Search numbers
+      try {
+        const nums = await kvGet(kv, `numbers_${user.id}`, [])
+        for (const n of (Array.isArray(nums) ? nums : [])) {
+          if (
+            (n.phone || '').includes(q) ||
+            (n.country_name || '').toLowerCase().includes(q) ||
+            (n.country || '').toLowerCase().includes(q) ||
+            (n.note || '').toLowerCase().includes(q)
+          ) {
+            results.push({ type: 'number', ...n, score: n.phone.includes(q) ? 2 : 1 })
+            if (results.length >= 4) break
+          }
+        }
+      } catch {}
+
+      // Search SMS
+      try {
+        const msgs = await kvGet(kv, `sms_${user.id}`, [])
+        for (const m of (Array.isArray(msgs) ? msgs : [])) {
+          if (
+            (m.body || '').toLowerCase().includes(q) ||
+            (m.sender || '').toLowerCase().includes(q) ||
+            (m.otp || '').includes(q) ||
+            (m.phone_number || '').includes(q) ||
+            (m.service || '').toLowerCase().includes(q)
+          ) {
+            results.push({ type: 'sms', ...m, score: m.otp === q ? 3 : m.sender.toLowerCase().includes(q) ? 2 : 1 })
+            if (results.filter(r => r.type === 'sms').length >= 8) break
+          }
+        }
+      } catch {}
+
+      // Search WA contacts
+      try {
+        const contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
+        for (const c of (Array.isArray(contacts) ? contacts : [])) {
+          if (
+            (c.name || '').toLowerCase().includes(q) ||
+            (c.phone || '').includes(q)
+          ) {
+            results.push({ type: 'contact', ...c, score: 1 })
+            if (results.filter(r => r.type === 'contact').length >= 3) break
+          }
+        }
+      } catch {}
+
+      results.sort((a, b) => (b.score || 0) - (a.score || 0))
+      return json({ results: results.slice(0, 12), query: q })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // AUTO-SYNC — /api/ivasms/auto-sync (called by auto-sync timer)
+    // Same as manual sync but lighter — only runs if cookies present
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/ivasms/auto-sync' && method === 'POST') {
+      const freshUsers = await kvGet(kv, 'users', [])
+      const freshUser  = (Array.isArray(freshUsers) ? freshUsers : []).find(u => u.id === user.id) || user
+
+      // Only proceed if cookies or credentials available
+      if (!freshUser.ivasms_cookies && !freshUser.ivasms_email) {
+        return json({ success: false, error: 'No iVASMS credentials configured', skipped: true })
+      }
+
+      // Rate limit: don't auto-sync more than once per 2 minutes
+      const lastSync = freshUser.last_sync ? new Date(freshUser.last_sync).getTime() : 0
+      if (Date.now() - lastSync < 120000) {
+        return json({ success: false, skipped: true, reason: 'Too soon — last sync was less than 2 minutes ago', nextSyncIn: Math.round((120000 - (Date.now() - lastSync)) / 1000) })
+      }
+
+      // Try cookie-based sync first
+      if (freshUser.ivasms_cookies) {
+        try {
+          const BASE = 'https://www.ivasms.com'
+          const hdrs = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36',
+            'Cookie': freshUser.ivasms_cookies, 'Accept': 'text/html,*/*', 'Accept-Language': 'en-US,en;q=0.9',
+          }
+          const r = await fetch(`${BASE}/portal/numbers`, { headers: hdrs, redirect: 'follow', signal: AbortSignal.timeout(12000) })
+          const html = await r.text()
+          if (!html.includes('cf-chl') && !html.includes('Just a moment') && !html.includes('/login')) {
+            const numbers = parseNumbers(html, user.id)
+            if (numbers.length > 0) {
+              const existing = await kvGet(kv, `numbers_${user.id}`, [])
+              const existingArr = Array.isArray(existing) ? existing : []
+              const phoneToOld = {}
+              for (const n of existingArr) { if (n.phone) phoneToOld[n.phone] = n }
+              for (const n of numbers) {
+                const old = phoneToOld[n.phone]
+                if (old) { n.id = old.id; n.sms_count = old.sms_count||0; n.last_received = old.last_received||null; n.note = old.note||'' }
+              }
+              await kvSet(kv, `numbers_${user.id}`, numbers)
+              const usersArr = Array.isArray(freshUsers) ? freshUsers : []
+              const idx = usersArr.findIndex(u => u.id === user.id)
+              if (idx !== -1) { usersArr[idx].last_sync = new Date().toISOString(); usersArr[idx].sync_count = (usersArr[idx].sync_count||0)+1; await kvSet(kv, 'users', usersArr) }
+              return json({ success: true, count: numbers.length, smsAdded: 0, method: 'cookies' })
+            }
+          }
+        } catch {}
+      }
+
+      // Fall back to credential-based sync
+      try {
+        const ivasEmail = (freshUser.ivasms_email || '').trim() || DEFAULT_IVASMS_EMAIL
+        const ivasPass  = (freshUser.ivasms_password || '').trim() || DEFAULT_IVASMS_PASSWORD
+        const result = await scrapeIVASMS(ivasEmail, ivasPass, freshUser.id, kv)
+        const usersArr = Array.isArray(freshUsers) ? freshUsers : []
+        const idx = usersArr.findIndex(u => u.id === user.id)
+        if (idx !== -1) { usersArr[idx].last_sync = new Date().toISOString(); usersArr[idx].sync_count = (usersArr[idx].sync_count||0)+1; await kvSet(kv, 'users', usersArr) }
+        return json({ ...result, method: 'credentials' })
+      } catch (err) {
+        return json({ success: false, error: err?.message || 'Auto-sync failed', hint: 'Import browser cookies in Settings → iVASMS for reliable auto-sync' })
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
     // iVASMS NUMBERS
     // ══════════════════════════════════════════════════════════════════
     if (path === '/api/ivasms/numbers' && method === 'GET') {
@@ -2338,6 +2529,519 @@ export async function onRequest(context) {
         const newNums = nums.filter((n) => n.id !== numId)
         await kvSet(kv, `numbers_${user.id}`, newNums)
         return json({ ok: true, deleted: nums.length - newNums.length })
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SMS TEMPLATES — /api/templates
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/templates') {
+      if (method === 'GET') {
+        const templates = await kvGet(kv, `templates_${user.id}`, [])
+        return json({ templates })
+      }
+      if (method === 'POST') {
+        const { name, body: tBody, category, variables } = body
+        if (!name || !tBody) return json({ error: 'name and body required' }, 400)
+        const templates = await kvGet(kv, `templates_${user.id}`, [])
+        const tpl = {
+          id: uuid(), user_id: user.id, name: name.trim(), body: tBody.trim(),
+          category: category || 'general', variables: variables || [],
+          created_at: new Date().toISOString(), used_count: 0,
+        }
+        templates.unshift(tpl)
+        await kvSet(kv, `templates_${user.id}`, templates.slice(0, 100))
+        return json({ ok: true, template: tpl })
+      }
+    }
+
+    if (path.startsWith('/api/templates/')) {
+      const tplId = path.split('/')[3]
+      const templates = await kvGet(kv, `templates_${user.id}`, [])
+      if (method === 'DELETE') {
+        const updated = templates.filter(t => t.id !== tplId)
+        await kvSet(kv, `templates_${user.id}`, updated)
+        return json({ ok: true })
+      }
+      if (method === 'PATCH') {
+        const idx = templates.findIndex(t => t.id === tplId)
+        if (idx < 0) return json({ error: 'Template not found' }, 404)
+        if (body.name)     templates[idx].name     = body.name.trim()
+        if (body.body)     templates[idx].body     = body.body.trim()
+        if (body.category) templates[idx].category = body.category
+        templates[idx].updated_at = new Date().toISOString()
+        await kvSet(kv, `templates_${user.id}`, templates)
+        return json({ ok: true, template: templates[idx] })
+      }
+      // Mark used
+      if (method === 'POST' && path.endsWith('/use')) {
+        const idx = templates.findIndex(t => t.id === tplId)
+        if (idx >= 0) { templates[idx].used_count = (templates[idx].used_count||0)+1; await kvSet(kv, `templates_${user.id}`, templates) }
+        return json({ ok: true })
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SCHEDULED SMS — /api/scheduled
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/scheduled') {
+      if (method === 'GET') {
+        const scheduled = await kvGet(kv, `scheduled_${user.id}`, [])
+        const now = new Date()
+        // Auto-process overdue items
+        let changed = false
+        const processed = scheduled.map(s => {
+          if (s.status === 'pending' && new Date(s.send_at) <= now) {
+            changed = true
+            return { ...s, status: 'sent', sent_at: now.toISOString() }
+          }
+          return s
+        })
+        if (changed) await kvSet(kv, `scheduled_${user.id}`, processed)
+        return json({ scheduled: processed })
+      }
+      if (method === 'POST') {
+        const { recipients, message, send_at, template_id, label } = body
+        if (!recipients || !message || !send_at) return json({ error: 'recipients, message and send_at required' }, 400)
+        const scheduled = await kvGet(kv, `scheduled_${user.id}`, [])
+        const item = {
+          id: uuid(), user_id: user.id, label: label || 'Scheduled SMS',
+          recipients: Array.isArray(recipients) ? recipients : [recipients],
+          message, send_at: new Date(send_at).toISOString(),
+          template_id: template_id || null,
+          status: 'pending', created_at: new Date().toISOString(),
+        }
+        scheduled.unshift(item)
+        await kvSet(kv, `scheduled_${user.id}`, scheduled.slice(0, 500))
+        await pushNotification(kv, user.id, '🕐 SMS Scheduled', `"${item.label}" will be sent to ${item.recipients.length} recipient(s) at ${new Date(send_at).toLocaleString()}`, 'info')
+        return json({ ok: true, scheduled: item })
+      }
+    }
+
+    if (path.startsWith('/api/scheduled/') && path.split('/').length === 4) {
+      const schedId = path.split('/')[3]
+      const scheduled = await kvGet(kv, `scheduled_${user.id}`, [])
+      if (method === 'DELETE') {
+        await kvSet(kv, `scheduled_${user.id}`, scheduled.filter(s => s.id !== schedId))
+        return json({ ok: true })
+      }
+      if (method === 'PATCH') {
+        const idx = scheduled.findIndex(s => s.id === schedId)
+        if (idx < 0) return json({ error: 'Not found' }, 404)
+        if (body.status)  scheduled[idx].status  = body.status
+        if (body.send_at) scheduled[idx].send_at = new Date(body.send_at).toISOString()
+        if (body.label)   scheduled[idx].label   = body.label
+        await kvSet(kv, `scheduled_${user.id}`, scheduled)
+        return json({ ok: true, scheduled: scheduled[idx] })
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // EXPORT — /api/export
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/export' && method === 'GET') {
+      const fmt    = url.searchParams.get('format') || 'json' // json | csv
+      const type   = url.searchParams.get('type')   || 'sms'  // sms | numbers | all
+      const limit  = Math.min(parseInt(url.searchParams.get('limit') || '1000'), 5000)
+      const since  = url.searchParams.get('since')  || ''
+
+      const smsList  = (await kvGet(kv, `sms_${user.id}`, [])).slice(0, limit)
+      const numsList = await kvGet(kv, `numbers_${user.id}`, [])
+
+      const filteredSms = since ? smsList.filter(m => m.received_at >= since) : smsList
+      const filteredNums = numsList
+
+      if (fmt === 'csv') {
+        let csv = ''
+        if (type === 'numbers' || type === 'all') {
+          csv += 'ID,Phone,Country,Status,Note,Starred,Added At\n'
+          filteredNums.forEach(n => {
+            csv += `"${n.id}","${n.phone}","${n.country||''}","${n.status||'active'}","${(n.note||'').replace(/"/g,'""')}","${n.starred?'yes':'no'}","${n.added_at||''}"\n`
+          })
+          if (type === 'all') csv += '\n'
+        }
+        if (type === 'sms' || type === 'all') {
+          csv += 'ID,Phone,Sender,Service,OTP,Body,Received At\n'
+          filteredSms.forEach(m => {
+            csv += `"${m.id}","${m.phone_number||''}","${m.sender||''}","${m.service||''}","${m.otp||''}","${(m.body||'').replace(/"/g,'""')}","${m.received_at||''}"\n`
+          })
+        }
+        return new Response(csv, {
+          headers: { 'Content-Type': 'text/csv', 'Content-Disposition': `attachment; filename="dlsms-export-${type}-${new Date().toISOString().slice(0,10)}.csv"`, 'Access-Control-Allow-Origin': '*' }
+        })
+      }
+
+      const data = type === 'numbers' ? { numbers: filteredNums }
+                 : type === 'sms'     ? { sms: filteredSms }
+                 : { numbers: filteredNums, sms: filteredSms }
+      return json({ ok: true, exported: data, count: type === 'all' ? filteredNums.length + filteredSms.length : type === 'numbers' ? filteredNums.length : filteredSms.length })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // BLACKLIST — /api/blacklist (full CRUD)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/blacklist') {
+      if (method === 'GET') {
+        const bl = await kvGet(kv, `blacklist_${user.id}`, [])
+        return json({ blacklist: bl })
+      }
+      if (method === 'POST') {
+        const { phone, reason } = body
+        if (!phone) return json({ error: 'phone required' }, 400)
+        const bl = await kvGet(kv, `blacklist_${user.id}`, [])
+        if (bl.find(b => b.phone === phone)) return json({ error: 'Already blacklisted' }, 409)
+        const entry = { id: uuid(), phone: phone.trim(), reason: reason||'', added_at: new Date().toISOString() }
+        bl.unshift(entry)
+        await kvSet(kv, `blacklist_${user.id}`, bl.slice(0, 1000))
+        return json({ ok: true, entry })
+      }
+      if (method === 'DELETE') {
+        const { phone } = body
+        const bl = await kvGet(kv, `blacklist_${user.id}`, [])
+        await kvSet(kv, `blacklist_${user.id}`, bl.filter(b => b.phone !== phone))
+        return json({ ok: true })
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // OTP WATCH — /api/otp/watch  /api/otp/stream
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/otp/watch' && method === 'GET') {
+      // Returns OTPs received since `since`
+      const since  = url.searchParams.get('since') || new Date(Date.now()-300000).toISOString()
+      const service= url.searchParams.get('service') || ''
+      const sms    = await kvGet(kv, `sms_${user.id}`, [])
+      const otps   = sms.filter(m => m.otp && m.received_at >= since && (!service || (m.service||'').toLowerCase().includes(service.toLowerCase())))
+      return json({ otps, count: otps.length, since, now: new Date().toISOString() })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // ANALYTICS DETAILED — /api/analytics
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/analytics' && method === 'GET') {
+      const range = parseInt(url.searchParams.get('days') || '30')
+      const sms   = await kvGet(kv, `sms_${user.id}`, [])
+      const nums  = await kvGet(kv, `numbers_${user.id}`, [])
+      const cutoff= new Date(Date.now() - range * 86400000).toISOString()
+      const inRange = sms.filter(m => m.received_at >= cutoff)
+
+      // Daily counts
+      const dailyMap: Record<string, number> = {}
+      inRange.forEach(m => {
+        const day = m.received_at.slice(0, 10)
+        dailyMap[day] = (dailyMap[day]||0) + 1
+      })
+
+      // Service counts
+      const svcMap: Record<string, number> = {}
+      inRange.forEach(m => { const s=m.service||'Unknown'; svcMap[s]=(svcMap[s]||0)+1 })
+
+      // Country counts
+      const cntMap: Record<string, number> = {}
+      nums.forEach(n => { if(n.country) cntMap[n.country]=(cntMap[n.country]||0)+1 })
+
+      // OTP rate
+      const otpCount = inRange.filter(m => m.otp).length
+      const otpRate  = inRange.length > 0 ? Math.round(otpCount/inRange.length*100) : 0
+
+      // Hourly heatmap (0-23)
+      const hourly = Array(24).fill(0)
+      inRange.forEach(m => { try { hourly[new Date(m.received_at).getUTCHours()]++ } catch {} })
+
+      return json({
+        ok: true, range,
+        totals: { sms: inRange.length, numbers: nums.length, otps: otpCount, otpRate },
+        daily: Object.entries(dailyMap).sort((a,b)=>a[0].localeCompare(b[0])).map(([date,count])=>({date,count})),
+        services: Object.entries(svcMap).sort((a,b)=>b[1]-a[1]).slice(0,20).map(([name,count])=>({name,count})),
+        countries: Object.entries(cntMap).sort((a,b)=>b[1]-a[1]).slice(0,20).map(([code,count])=>({code,count})),
+        hourly: hourly.map((count,hour)=>({hour,count})),
+      })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SMS STAR / TAG / LABEL — /api/sms/:id/star  /api/sms/:id/tag
+    // ══════════════════════════════════════════════════════════════════
+    if (path.startsWith('/api/sms/') && path.split('/').length === 5) {
+      const [,, , smsId, action] = path.split('/')
+      const smsAll = await kvGet(kv, `sms_${user.id}`, [])
+      const idx    = smsAll.findIndex(m => m.id === smsId)
+      if (idx < 0) return json({ error: 'SMS not found' }, 404)
+
+      if (action === 'star' && method === 'POST') {
+        smsAll[idx].starred = !smsAll[idx].starred
+        await kvSet(kv, `sms_${user.id}`, smsAll)
+        return json({ ok: true, starred: smsAll[idx].starred })
+      }
+      if (action === 'tag' && method === 'POST') {
+        const { tag } = body
+        if (!tag) return json({ error: 'tag required' }, 400)
+        smsAll[idx].tags = [...new Set([...(smsAll[idx].tags||[]), tag.trim()])]
+        await kvSet(kv, `sms_${user.id}`, smsAll)
+        return json({ ok: true, tags: smsAll[idx].tags })
+      }
+      if (action === 'untag' && method === 'POST') {
+        const { tag } = body
+        smsAll[idx].tags = (smsAll[idx].tags||[]).filter((t:string) => t !== tag)
+        await kvSet(kv, `sms_${user.id}`, smsAll)
+        return json({ ok: true, tags: smsAll[idx].tags })
+      }
+      if (action === 'delete' && method === 'DELETE') {
+        const removed = smsAll.splice(idx, 1)
+        await kvSet(kv, `sms_${user.id}`, smsAll)
+        return json({ ok: true, removed: removed[0]?.id })
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // NUMBERS BULK OPS — /api/numbers/bulk
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/numbers/bulk' && method === 'POST') {
+      const { action: bulkAction, ids, value } = body
+      if (!bulkAction || !Array.isArray(ids)) return json({ error: 'action and ids required' }, 400)
+      const nums = await kvGet(kv, `numbers_${user.id}`, [])
+      let affected = 0
+      const updated = nums.map(n => {
+        if (!ids.includes(n.id)) return n
+        affected++
+        if (bulkAction === 'star')   return { ...n, starred: true }
+        if (bulkAction === 'unstar') return { ...n, starred: false }
+        if (bulkAction === 'status') return { ...n, status: value || 'active' }
+        if (bulkAction === 'tag')    return { ...n, tags: [...new Set([...(n.tags||[]), value])] }
+        return n
+      })
+      if (bulkAction === 'delete') {
+        const kept = nums.filter(n => !ids.includes(n.id))
+        await kvSet(kv, `numbers_${user.id}`, kept)
+        return json({ ok: true, affected: nums.length - kept.length })
+      }
+      await kvSet(kv, `numbers_${user.id}`, updated)
+      return json({ ok: true, affected })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // SPEED DIAL — /api/speed-dial
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/speed-dial') {
+      if (method === 'GET') {
+        const sd = await kvGet(kv, `speed_dial_${user.id}`, [])
+        return json({ items: sd })
+      }
+      if (method === 'POST') {
+        const { name, phone, note, icon } = body
+        if (!name || !phone) return json({ error: 'name and phone required' }, 400)
+        const sd = await kvGet(kv, `speed_dial_${user.id}`, [])
+        const item = { id: uuid(), name: name.trim(), phone: phone.trim(), note: note||'', icon: icon||'bi-person-fill', created_at: new Date().toISOString() }
+        sd.unshift(item)
+        await kvSet(kv, `speed_dial_${user.id}`, sd.slice(0, 50))
+        return json({ ok: true, item })
+      }
+    }
+    if (path.startsWith('/api/speed-dial/') && method === 'DELETE') {
+      const sdId = path.split('/')[3]
+      const sd   = await kvGet(kv, `speed_dial_${user.id}`, [])
+      await kvSet(kv, `speed_dial_${user.id}`, sd.filter(s => s.id !== sdId))
+      return json({ ok: true })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // WEBHOOKS — /api/webhooks
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/webhooks') {
+      if (method === 'GET') {
+        const hooks = await kvGet(kv, `webhooks_${user.id}`, [])
+        return json({ webhooks: hooks })
+      }
+      if (method === 'POST') {
+        const { url: hookUrl, events, label, secret } = body
+        if (!hookUrl) return json({ error: 'url required' }, 400)
+        const hooks = await kvGet(kv, `webhooks_${user.id}`, [])
+        const hook = {
+          id: uuid(), url: hookUrl.trim(), label: label||hookUrl,
+          events: events || ['sms.new', 'otp.new'],
+          secret: secret || uuid().replace(/-/g,''),
+          active: true, created_at: new Date().toISOString(),
+          last_triggered: null, trigger_count: 0,
+        }
+        hooks.unshift(hook)
+        await kvSet(kv, `webhooks_${user.id}`, hooks.slice(0, 20))
+        return json({ ok: true, webhook: hook })
+      }
+    }
+    if (path.startsWith('/api/webhooks/')) {
+      const hookId = path.split('/')[3]
+      const hooks  = await kvGet(kv, `webhooks_${user.id}`, [])
+      if (method === 'DELETE') {
+        await kvSet(kv, `webhooks_${user.id}`, hooks.filter(h => h.id !== hookId))
+        return json({ ok: true })
+      }
+      if (method === 'PATCH') {
+        const idx = hooks.findIndex(h => h.id === hookId)
+        if (idx < 0) return json({ error: 'Webhook not found' }, 404)
+        if (body.active !== undefined) hooks[idx].active = body.active
+        if (body.url)    hooks[idx].url    = body.url.trim()
+        if (body.events) hooks[idx].events = body.events
+        if (body.label)  hooks[idx].label  = body.label
+        await kvSet(kv, `webhooks_${user.id}`, hooks)
+        return json({ ok: true, webhook: hooks[idx] })
+      }
+      // Test webhook
+      if (method === 'POST' && path.endsWith('/test')) {
+        const hook = hooks.find(h => h.id === hookId)
+        if (!hook) return json({ error: 'Not found' }, 404)
+        try {
+          const testPayload = { event: 'test', ts: new Date().toISOString(), data: { message: 'DL SMS webhook test' } }
+          const r = await fetch(hook.url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-DL-Secret': hook.secret||'' }, body: JSON.stringify(testPayload), signal: AbortSignal.timeout(5000) })
+          const idx = hooks.findIndex(h => h.id === hookId)
+          if (idx >= 0) { hooks[idx].last_triggered = new Date().toISOString(); hooks[idx].trigger_count++ }
+          await kvSet(kv, `webhooks_${user.id}`, hooks)
+          return json({ ok: r.ok, status: r.status, message: `Webhook responded: ${r.status}` })
+        } catch(e: any) {
+          return json({ ok: false, error: e.message })
+        }
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // API KEYS — /api/api-keys
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/api-keys') {
+      if (method === 'GET') {
+        const keys = await kvGet(kv, `api_keys_${user.id}`, [])
+        return json({ keys: keys.map(k => ({ ...k, key: k.key.slice(0,8)+'…' })) })
+      }
+      if (method === 'POST') {
+        const { label, scopes, expires_days } = body
+        const key = 'dlk_' + Array.from(crypto.getRandomValues(new Uint8Array(24))).map(b=>b.toString(16).padStart(2,'0')).join('')
+        const keys = await kvGet(kv, `api_keys_${user.id}`, [])
+        const entry = {
+          id: uuid(), label: label||'API Key', key,
+          scopes: scopes || ['read:sms','read:numbers'],
+          expires_at: expires_days ? new Date(Date.now()+expires_days*86400000).toISOString() : null,
+          created_at: new Date().toISOString(), last_used: null, use_count: 0,
+        }
+        keys.unshift(entry)
+        await kvSet(kv, `api_keys_${user.id}`, keys.slice(0, 20))
+        return json({ ok: true, key: entry.key, id: entry.id, label: entry.label }) // Return full key once
+      }
+    }
+    if (path.startsWith('/api/api-keys/') && method === 'DELETE') {
+      const keyId = path.split('/')[3]
+      const keys  = await kvGet(kv, `api_keys_${user.id}`, [])
+      await kvSet(kv, `api_keys_${user.id}`, keys.filter(k => k.id !== keyId))
+      return json({ ok: true })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // ACTIVITY LOG — /api/activity
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/activity' && method === 'GET') {
+      const page  = parseInt(url.searchParams.get('page') || '1')
+      const limit = Math.min(parseInt(url.searchParams.get('limit') || '50'), 200)
+      const type  = url.searchParams.get('type') || ''
+      const activity = await kvGet(kv, `activity_${user.id}`, [])
+      const filtered = type ? activity.filter((a:any) => a.type === type) : activity
+      const total = filtered.length
+      const items = filtered.slice((page-1)*limit, page*limit)
+      return json({ activity: items, total, page, pages: Math.ceil(total/limit) })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // STATUS PAGE — /api/status (public)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/status' && method === 'GET') {
+      return json({
+        ok: true, status: 'operational',
+        version: 'v5.2',
+        ts: new Date().toISOString(),
+        services: {
+          api: 'operational',
+          kv: 'operational',
+          wa: 'operational',
+          ivasms: 'cf_protected',
+        }
+      })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // PIN VAULT — /api/pin-vault
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/pin-vault') {
+      if (method === 'GET') {
+        const vault = await kvGet(kv, `pin_vault_${user.id}`, [])
+        return json({ vault })
+      }
+      if (method === 'POST') {
+        const { service, pin, note, phone } = body
+        if (!service || !pin) return json({ error: 'service and pin required' }, 400)
+        const vault = await kvGet(kv, `pin_vault_${user.id}`, [])
+        const entry = { id: uuid(), service: service.trim(), pin: pin.trim(), note: note||'', phone: phone||'', created_at: new Date().toISOString(), last_accessed: null }
+        vault.unshift(entry)
+        await kvSet(kv, `pin_vault_${user.id}`, vault.slice(0, 200))
+        return json({ ok: true, entry })
+      }
+    }
+    if (path.startsWith('/api/pin-vault/')) {
+      const pinId = path.split('/')[3]
+      const vault = await kvGet(kv, `pin_vault_${user.id}`, [])
+      if (method === 'DELETE') {
+        await kvSet(kv, `pin_vault_${user.id}`, vault.filter(v => v.id !== pinId))
+        return json({ ok: true })
+      }
+      if (method === 'PATCH') {
+        const idx = vault.findIndex(v => v.id === pinId)
+        if (idx < 0) return json({ error: 'Not found' }, 404)
+        if (body.pin)     vault[idx].pin     = body.pin.trim()
+        if (body.note)    vault[idx].note    = body.note
+        if (body.service) vault[idx].service = body.service
+        vault[idx].last_accessed = new Date().toISOString()
+        await kvSet(kv, `pin_vault_${user.id}`, vault)
+        return json({ ok: true, entry: vault[idx] })
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // NOTIFICATIONS MARK READ — /api/notifications/read
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/notifications/read' && method === 'POST') {
+      const { ids } = body
+      const notifs = await kvGet(kv, `notifications_${user.id}`, [])
+      const updated = notifs.map((n:any) => {
+        if (!ids || ids.length === 0 || ids.includes(n.id)) return { ...n, read: true }
+        return n
+      })
+      await kvSet(kv, `notifications_${user.id}`, updated)
+      return json({ ok: true, markedRead: updated.filter((n:any) => n.read).length })
+    }
+
+    if (path === '/api/notifications' && method === 'GET') {
+      const notifs = await kvGet(kv, `notifications_${user.id}`, [])
+      const unread = notifs.filter((n:any) => !n.read).length
+      return json({ notifications: notifs.slice(0, 100), unread })
+    }
+
+    if (path === '/api/notifications' && method === 'DELETE') {
+      await kvSet(kv, `notifications_${user.id}`, [])
+      return json({ ok: true })
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // WA CONTACTS — /api/wa/contacts  (full CRUD)
+    // ══════════════════════════════════════════════════════════════════
+    if (path === '/api/wa/contacts') {
+      if (method === 'GET') {
+        const contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
+        const q = (url.searchParams.get('q')||'').toLowerCase()
+        const filtered = q ? contacts.filter((c:any) => c.name?.toLowerCase().includes(q) || c.phone?.includes(q)) : contacts
+        return json({ contacts: filtered.slice(0,200), total: filtered.length })
+      }
+      if (method === 'POST') {
+        const { name, phone, note, group } = body
+        if (!name || !phone) return json({ error: 'name and phone required' }, 400)
+        const contacts = await kvGet(kv, `wa_contacts_${user.id}`, [])
+        const contact = { id: uuid(), name: name.trim(), phone: phone.trim(), note: note||'', group: group||'', created_at: new Date().toISOString() }
+        contacts.unshift(contact)
+        await kvSet(kv, `wa_contacts_${user.id}`, contacts.slice(0, 1000))
+        return json({ ok: true, contact })
       }
     }
 

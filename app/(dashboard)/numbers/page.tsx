@@ -92,14 +92,9 @@ export default function NumbersPage() {
   },[nums,search,statusF,countryF,sortBy,sortDir,onlyStarred,starred])
 
   const inject=async()=>{
-    setInjecting(true)
-    try{
-      const r=await fetch('/api/ivasms/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-      const d=await r.json()
-      if(r.ok){showMsg(true,`✅ ${d.count} numbers + ${d.smsCount} SMS loaded!`);await loadNums()}
-      else showMsg(false,d.error||'Failed')
-    } catch(e:any){showMsg(false,e.message)}
-    setInjecting(false)
+    // Redirect to cookie import — fake inject removed
+    setShowImport(true)
+    showMsg(false,'⚠️ Fake data removed. Import real cookies from ivasms.com below ↓')
   }
 
   const sync=async()=>{
@@ -230,7 +225,7 @@ export default function NumbersPage() {
             {live?'Live ON':'Live'}
           </button>
           <Btn onClick={()=>setShowImport(v=>!v)} icon="bi-cookie" label="Import Cookies" color="default"/>
-          <Btn onClick={inject} disabled={false} icon="bi-download" label={injecting?'Loading…':'Load Numbers'} color="primary" loading={injecting}/>
+          <Btn onClick={()=>setShowImport(v=>!v)} icon="bi-cookie" label="Import Real Cookies" color="primary"/>
           <Btn onClick={sync} icon="bi-arrow-clockwise" label={syncing?'Syncing…':'Sync'} loading={syncing}/>
           <Btn onClick={exportCSV} icon="bi-download" label="CSV"/>
           <button onClick={()=>setView(v=>v==='table'?'grid':'table')} style={{
@@ -385,11 +380,11 @@ export default function NumbersPage() {
           <i className="bi bi-phone-fill" style={{fontSize:48,color:G.text3,display:'block',marginBottom:16}}/>
           <h3 style={{margin:'0 0 8px',color:G.text1,fontSize:18,fontWeight:700}}>No Numbers Yet</h3>
           <p style={{color:G.text2,fontSize:13,marginBottom:24,lineHeight:1.6,maxWidth:400,margin:'0 auto 24px'}}>
-            Load demo numbers or import real data from iVASMS.com using your browser cookies.
+            Import your real numbers from iVASMS.com using browser cookies, or run Sync if you have credentials saved.
           </p>
           <div style={{display:'flex',gap:12,justifyContent:'center',flexWrap:'wrap'}}>
-            <Btn onClick={inject} icon="bi-download" label={injecting?'Loading…':'Load Demo Numbers'} color="primary" loading={injecting}/>
-            <Btn onClick={()=>setShowImport(true)} icon="bi-cookie" label="Import Real Cookies"/>
+            <Btn onClick={()=>setShowImport(true)} icon="bi-cookie" label="Import Cookies from iVASMS" color="primary"/>
+            <Btn onClick={sync} icon="bi-arrow-clockwise" label={syncing?'Syncing…':'Try Auto-Sync'} loading={syncing}/>
           </div>
         </div>
       )}

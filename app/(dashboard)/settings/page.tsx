@@ -1,5 +1,6 @@
 'use client'
 import { useState, useEffect } from 'react'
+import Link from 'next/link'
 
 const G = {
   bg:'#0a0a0f', card:'#111118', card2:'#16161f', card3:'#1a1a24',
@@ -40,8 +41,6 @@ export default function SettingsPage() {
   const [ivasResult,  setIvasResult]  = useState<any>(null)
   const [ivasTesting, setIvasTesting] = useState(false)
   const [ivasSaving,  setIvasSaving]  = useState(false)
-  const [injecting,   setInjecting]   = useState(false)
-  const [injectMsg,   setInjectMsg]   = useState('')
   const [importCookies, setImportCookies] = useState('')
   const [importing,   setImporting]   = useState(false)
 
@@ -132,16 +131,6 @@ export default function SettingsPage() {
       setIvasResult(d)
     } catch(e:any){setIvasResult({error:e.message})}
     setIvasSaving(false); setIvasTesting(false)
-  }
-
-  const inject=async()=>{
-    setInjecting(true);setInjectMsg('')
-    try{
-      const r=await fetch('/api/ivasms/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-      const d=await r.json()
-      setInjectMsg(r.ok?`✅ Loaded ${d.count} numbers + ${d.smsCount} SMS`:`❌ ${d.error||'Failed'}`)
-    } catch(e:any){setInjectMsg(`❌ ${e.message}`)}
-    setInjecting(false)
   }
 
   const importCookiesHandler=async()=>{
@@ -367,12 +356,19 @@ export default function SettingsPage() {
             <Alert k="import"/>
           </Section>
 
-          <Section title="Demo Data (Inject)" icon="bi-database-fill">
+          <Section title="Get Real Numbers" icon="bi-phone-fill">
             <p style={{fontSize:13,color:G.text2,marginBottom:14,lineHeight:1.6}}>
-              Load 36 demo numbers with 100+ realistic SMS messages including OTPs for testing. This replaces existing data.
+              Fake/seed data has been removed. To get real numbers, import your iVASMS browser cookies above, or go to the Numbers page to use the full cookie import workflow.
             </p>
-            <Btn onClick={inject} icon="bi-download" label={injecting?'Loading…':'Load Demo Numbers + SMS'} color="primary" loading={injecting}/>
-            {injectMsg&&<div style={{marginTop:10,fontSize:12,color:injectMsg.startsWith('✅')?G.green:G.red}}>{injectMsg}</div>}
+            <Link href="/numbers" style={{
+              display:'inline-flex',alignItems:'center',gap:8,padding:'10px 18px',borderRadius:10,
+              background:`linear-gradient(135deg,${G.accent},#a855f7)`,
+              color:'#fff',fontSize:12,fontWeight:700,textDecoration:'none',
+              boxShadow:'0 3px 12px rgba(124,58,237,0.35)',
+            }}>
+              <i className="bi bi-cookie" style={{fontSize:12}}/>
+              Go to Numbers → Import Cookies
+            </Link>
           </Section>
         </>
       )}

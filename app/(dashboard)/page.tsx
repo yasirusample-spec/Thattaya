@@ -1,6 +1,7 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 
 const G = {
   bg: '#0a0a0f',
@@ -90,10 +91,10 @@ function StatCard({ icon, label, value, sub, color, dim, href, delta }: any) {
 }
 
 export default function Dashboard() {
+  const router = useRouter()
   const [nums,    setNums]    = useState<any[]>([])
   const [sms,     setSms]     = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [injecting, setInjecting] = useState(false)
   const [syncing, setSyncing] = useState(false)
   const [msg,     setMsg]     = useState<{ok:boolean,text:string}|null>(null)
   const [now,     setNow]     = useState(Date.now())
@@ -118,16 +119,7 @@ export default function Dashboard() {
 
   useEffect(() => { load(); const t=setInterval(()=>load(true),15000); return ()=>clearInterval(t) }, [load])
 
-  const inject = async () => {
-    setInjecting(true)
-    try {
-      const r = await fetch('/api/ivasms/inject',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'})
-      const d = await r.json()
-      if(r.ok){ showMsg(true,`✅ ${d.count} numbers + ${d.smsCount} SMS loaded!`); await load() }
-      else showMsg(false, d.error||'Failed')
-    } catch(e:any){ showMsg(false,e.message) }
-    setInjecting(false)
-  }
+  const goImportCookies = () => router.push('/numbers')
 
   const sync = async () => {
     setSyncing(true)
@@ -203,15 +195,15 @@ export default function Dashboard() {
         </div>
         <div style={{display:'flex',gap:10,flexWrap:'wrap'}}>
           {nums.length===0 && (
-            <button onClick={inject} disabled={injecting} style={{
+            <button onClick={goImportCookies} style={{
               display:'flex',alignItems:'center',gap:8,padding:'10px 20px',borderRadius:10,
               background:`linear-gradient(135deg, ${G.accent}, #a855f7)`,
-              border:'none',color:'#fff',fontSize:13,fontWeight:700,cursor:injecting?'not-allowed':'pointer',
-              opacity:injecting?0.7:1, boxShadow:'0 4px 15px rgba(124,58,237,0.4)',
+              border:'none',color:'#fff',fontSize:13,fontWeight:700,cursor:'pointer',
+              boxShadow:'0 4px 15px rgba(124,58,237,0.4)',
               transition:'all .2s ease',
             }}>
-              <i className={`bi ${injecting?'bi-arrow-repeat':'bi-download'}`} style={{fontSize:14,animation:injecting?'spin 0.8s linear infinite':undefined}}/>
-              {injecting?'Loading…':'Load Numbers'}
+              <i className="bi bi-cookie" style={{fontSize:14}}/>
+              Import Real Cookies
             </button>
           )}
           <button onClick={sync} disabled={syncing} style={{
@@ -271,13 +263,13 @@ export default function Dashboard() {
             {sms.length===0 ? (
               <div style={{padding:40,textAlign:'center'}}>
                 <i className="bi bi-chat-dots" style={{fontSize:32,color:G.text3}}/>
-                <p style={{color:G.text3,fontSize:13,marginTop:12}}>No SMS yet — load numbers first</p>
+                <p style={{color:G.text3,fontSize:13,marginTop:12}}>No SMS yet — import real numbers first</p>
                 {nums.length===0 && (
-                  <button onClick={inject} disabled={injecting} style={{
+                  <button onClick={goImportCookies} style={{
                     marginTop:12,padding:'8px 20px',borderRadius:8,
                     background:`linear-gradient(135deg,${G.accent},#a855f7)`,
                     border:'none',color:'#fff',fontSize:12,fontWeight:700,cursor:'pointer',
-                  }}>{injecting?'Loading…':'Load Numbers'}</button>
+                  }}>Import Cookies from iVASMS</button>
                 )}
               </div>
             ) : sms.slice(0,15).map(m=>{
@@ -440,8 +432,7 @@ export default function Dashboard() {
           <div style={{fontSize:13,fontWeight:700,color:G.yellow,marginBottom:4}}>iVASMS Cloudflare Protection</div>
           <div style={{fontSize:12,color:G.text2,lineHeight:1.6}}>
             iVASMS.com uses Cloudflare Managed Challenge — server-side login is blocked. 
-            To get real numbers: <strong style={{color:G.text1}}>Login at ivasms.com in your browser</strong>, then go to <Link href="/numbers" style={{color:G.accent,textDecoration:'none',fontWeight:700}}>Numbers page</Link> and use <strong style={{color:G.text1}}>"Import Cookies"</strong> to paste your browser session. 
-            Or click <strong style={{color:G.text1,cursor:'pointer'}} onClick={inject}>"Load Numbers"</strong> above for demo data.
+            To get real numbers: <strong style={{color:G.text1}}>Login at ivasms.com in your browser</strong>, then go to <Link href="/numbers" style={{color:G.accent,textDecoration:'none',fontWeight:700}}>Numbers page</Link> and use <strong style={{color:G.text1}}>"Import Cookies"</strong> to paste your browser session.
           </div>
         </div>
       </div>
